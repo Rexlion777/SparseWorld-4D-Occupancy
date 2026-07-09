@@ -1,0 +1,4 @@
+[submodule "external/SparseWorld"]
+	path = external/SparseWorld
+	url = https://github.com/MSunDYY/SparseWorld
+	ignore = dirty

@@ -1,0 +1,82 @@
+# Ignore everything by default. This GitHub repo is scoped to SparseWorld work,
+# not the full local cv_lidar_transition learning workspace.
+/*
+
+# Repo metadata/docs
+!/.gitignore
+!/.gitmodules
+!/README.md
+!/requirements.txt
+
+# Maintenance scripts for reproducible local/E-drive backups
+!/scripts/
+/scripts/*
+!/scripts/maintenance/
+!/scripts/maintenance/**
+
+# SparseWorld experiment source
+!/scripts/lidar_system_algorithm/
+/scripts/lidar_system_algorithm/*
+!/scripts/lidar_system_algorithm/sparseworld_mainline/
+!/scripts/lidar_system_algorithm/sparseworld_mainline/**
+
+# SparseWorld tests
+!/tests/
+/tests/*
+!/tests/sparseworld_mainline/
+!/tests/sparseworld_mainline/**
+
+# Upstream SparseWorld dependency is tracked only as a submodule pointer if added.
+!/external/
+/external/*
+!/external/SparseWorld
+
+# Never track generated/intermediate files even inside allowed paths.
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+*.pt
+*.pth
+*.ckpt
+*.npz
+*.npy
+*.pkl
+*.onnx
+*.engine
+*.bin
+*.cache
+*.log
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.rar
+*.bak
+*.bak_*
+*.source_snapshot_*.py
+
+# Local environments and generated outputs
+env/
+envs/
+data/
+artifacts/
+outputs/
+logs/
+reports/
+projects/
+videos/
+
+# Explicitly keep day-style learning folders out of GitHub.
+day*/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
