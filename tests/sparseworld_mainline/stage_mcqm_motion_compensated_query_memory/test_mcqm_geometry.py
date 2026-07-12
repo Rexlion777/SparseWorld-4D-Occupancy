@@ -77,6 +77,7 @@ from mcqm_local import (  # type: ignore[attr-defined]
     MCQMQ2FLevelDecoder,
     MCQMQ2FQueryProjector,
     MCQMV2Projector,
+    build_query_camera_filter,
     aggregate_query_semantics,
     bilinear_splat_features,
     blend_failed_camera_fpn_levels,
@@ -1886,6 +1887,144 @@ def test_bilinear_splat_invalid_point_writes_nothing():
     out = bilinear_splat_features(features, coords, weights, valid, (2, 2))
     assert float(out["weight_sum"].sum().item()) == 0.0
     assert float(out["support_mask"].float().sum().item()) == 0.0
+
+
+def test_build_query_camera_filter_none_returns_unit_weights():
+    query_features = torch.tensor([[[1.0, 2.0], [3.0, 4.0]]], dtype=torch.float32)
+    projected_xy = torch.tensor(
+        [[[[[1.0, 1.0]], [[2.0, 2.0]]]]],
+        dtype=torch.float32,
+    )
+    projected_depth = torch.tensor([[[[2.0], [3.0]]]], dtype=torch.float32)
+    result = build_query_camera_filter(
+        query_features=query_features,
+        projected_xy=projected_xy,
+        projected_depth=projected_depth,
+        image_hw=(4, 4),
+        mode="none",
+    )
+    assert result.query_camera_valid.shape == (1, 1, 2)
+    assert torch.equal(result.query_camera_weight, torch.ones_like(result.query_camera_weight))
+
+
+def test_build_query_camera_filter_geom_zeroes_invalid_pairs():
+    query_features = torch.tensor([[[1.0], [float("nan")], [2.0], [3.0]]], dtype=torch.float32)
+    projected_xy = torch.tensor(
+        [[
+            [[[1.0, 1.0]], [[1.0, 1.0]], [[5.0, 1.0]], [[1.0, 1.0]]]
+        ]],
+        dtype=torch.float32,
+    )
+    projected_depth = torch.tensor([[[[2.0], [2.0], [2.0], [-1.0]]]], dtype=torch.float32)
+    result = build_query_camera_filter(
+        query_features=query_features,
+        projected_xy=projected_xy,
+        projected_depth=projected_depth,
+        image_hw=(4, 4),
+        mode="geom",
+        projection_min_depth=1e-4,
+    )
+    expected = torch.tensor([[[1.0, 0.0, 0.0, 0.0]]], dtype=torch.float32)
+    assert torch.equal(result.query_camera_weight, expected)
+
+
+def test_build_query_camera_filter_confidence_mapping():
+    query_features = torch.ones(1, 5, 2, dtype=torch.float32)
+    projected_xy = torch.tensor(
+        [[[[[1.0, 1.0]], [[1.0, 1.0]], [[1.0, 1.0]], [[1.0, 1.0]], [[1.0, 1.0]]]]],
+        dtype=torch.float32,
+    )
+    projected_depth = torch.ones(1, 1, 5, 1, dtype=torch.float32)
+    confidence = torch.tensor([[0.0, 0.1, 0.3, 0.5, 1.0]], dtype=torch.float32)
+    result = build_query_camera_filter(
+        query_features=query_features,
+        projected_xy=projected_xy,
+        projected_depth=projected_depth,
+        image_hw=(4, 4),
+        mode="confidence",
+        query_confidence=confidence,
+        confidence_low=0.1,
+        confidence_high=0.5,
+    )
+    assert result.query_camera_weight[0, 0].tolist() == pytest.approx([0.0, 0.0, 0.5, 1.0, 1.0])
+
+
+def test_build_query_camera_filter_dynamic_downweight():
+    query_features = torch.ones(1, 3, 1, dtype=torch.float32)
+    projected_xy = torch.tensor(
+        [[[[[1.0, 1.0]], [[1.0, 1.0]], [[1.0, 1.0]]]]],
+        dtype=torch.float32,
+    )
+    projected_depth = torch.ones(1, 1, 3, 1, dtype=torch.float32)
+    labels = torch.tensor([[1, 4, 7]], dtype=torch.long)
+    result = build_query_camera_filter(
+        query_features=query_features,
+        projected_xy=projected_xy,
+        projected_depth=projected_depth,
+        image_hw=(4, 4),
+        mode="dynamic_downweight",
+        query_labels=labels,
+        dynamic_query_weight=0.25,
+        dynamic_class_ids={4, 7},
+    )
+    assert result.query_camera_weight[0, 0].tolist() == pytest.approx([1.0, 0.25, 0.25])
+
+
+def test_bilinear_splat_weighted_scatter_respects_reliability_weight():
+    features = torch.tensor([[[[2.0]], [[10.0]]]], dtype=torch.float32)
+    coords = torch.tensor([[[[1.0, 1.0]], [[1.0, 1.0]]]], dtype=torch.float32)
+    valid = torch.tensor([[[True], [True]]])
+    only_a = bilinear_splat_features(
+        features,
+        coords,
+        torch.tensor([[[1.0], [0.0]]], dtype=torch.float32),
+        valid,
+        (3, 3),
+    )
+    both = bilinear_splat_features(
+        features,
+        coords,
+        torch.tensor([[[1.0], [1.0]]], dtype=torch.float32),
+        valid,
+        (3, 3),
+    )
+    assert only_a["sparse_feature"][0, 0, 1, 1].item() == pytest.approx(2.0)
+    assert both["sparse_feature"][0, 0, 1, 1].item() == pytest.approx(6.0)
+
+
+def test_bilinear_splat_cell_topk_keeps_largest_contribution():
+    features = torch.tensor([[[[2.0]], [[10.0]]]], dtype=torch.float32)
+    coords = torch.tensor([[[[1.0, 1.0]], [[1.0, 1.0]]]], dtype=torch.float32)
+    weights = torch.tensor([[[0.2], [0.9]]], dtype=torch.float32)
+    valid = torch.tensor([[[True], [True]]])
+    out = bilinear_splat_features(
+        features,
+        coords,
+        weights,
+        valid,
+        (3, 3),
+        topk_per_cell=1,
+        return_diagnostics=True,
+    )
+    assert out["sparse_feature"][0, 0, 1, 1].item() == pytest.approx(10.0)
+    assert out["diagnostics"][0]["topk_removed_contribution_count"] == 1
+
+
+def test_bilinear_splat_no_nan_when_no_retained_query():
+    features = torch.tensor([[[[5.0]]]], dtype=torch.float32)
+    coords = torch.tensor([[[[1.0, 1.0]]]], dtype=torch.float32)
+    weights = torch.tensor([[[0.0]]], dtype=torch.float32)
+    valid = torch.tensor([[[True]]])
+    out = bilinear_splat_features(
+        features,
+        coords,
+        weights,
+        valid,
+        (2, 2),
+        return_diagnostics=True,
+    )
+    assert torch.isfinite(out["weight_sum"]).all()
+    assert torch.isfinite(out["sparse_feature"]).all()
 
 
 def test_replace_failed_camera_fpn_levels_preserves_healthy_cameras():

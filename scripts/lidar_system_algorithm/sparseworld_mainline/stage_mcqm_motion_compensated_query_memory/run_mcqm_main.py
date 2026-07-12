@@ -298,6 +298,7 @@ def parse_args() -> argparse.Namespace:
             "train_q2f_preflight",
             "train_q2f",
             "eval_q2f",
+            "query_filter_ablation",
             "full",
         ],
         default="stage_a",
@@ -314,6 +315,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--variant", default="A2")
     p.add_argument("--checkpoint", default="")
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--query-filter-mode", default="none")
+    p.add_argument("--query-confidence-low", type=float, default=0.1)
+    p.add_argument("--query-confidence-high", type=float, default=0.5)
+    p.add_argument("--dynamic-query-weight", type=float, default=0.25)
+    p.add_argument("--query-cell-topk", type=int, default=1)
+    p.add_argument("--query-projection-min-depth", type=float, default=1e-4)
+    p.add_argument("--dump-query-filter-diagnostics", action="store_true")
     return p.parse_args()
 
 
@@ -1217,6 +1225,13 @@ def mcqm_q2f_v1_cfg() -> dict[str, Any]:
         "mcqm_q2f_occ_loss_weight": 1.0,
         "mcqm_q2f_freeze_base_model": True,
         "mcqm_q2f_failed_camera_names": ["CAM_FRONT", "CAM_FRONT_RIGHT", "CAM_FRONT_LEFT"],
+        "query_filter_mode": "none",
+        "query_confidence_low": 0.1,
+        "query_confidence_high": 0.5,
+        "dynamic_query_weight": 0.25,
+        "query_cell_topk": 1,
+        "query_projection_min_depth": 1e-4,
+        "dump_query_filter_diagnostics": False,
     }
 
 
@@ -6341,11 +6356,14 @@ def run_q2f_current_frame_forward(
     current_batch_cuda: dict[str, Any],
     *,
     mode: str,
+    runtime_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if mode not in {"disabled", "bypass", "active"}:
         raise ValueError(f"unsupported q2f forward mode: {mode}")
     runtime_prev = getattr(model, "mcqm_v2_runtime_oracle", None)
     runtime_next = dict(runtime_prev) if isinstance(runtime_prev, dict) else {}
+    if runtime_overrides:
+        runtime_next.update(runtime_overrides)
     runtime_next["q2f_shallow_disable"] = mode == "disabled"
     runtime_next["q2f_shallow_bypass"] = mode == "bypass"
     model.mcqm_v2_runtime_oracle = runtime_next
@@ -6400,6 +6418,353 @@ def build_q2f_eval_parity_record(
         "rows": horizon_rows,
     }
 
+
+QUERY_FILTER_ABLATION_DIR = Q2F_ARTIFACTS_DIR / "query_filter_ablation"
+
+
+def _aggregate_rows_by_keys(rows: list[dict[str, Any]], group_keys: list[str]) -> list[dict[str, Any]]:
+    if not rows:
+        return []
+    buckets: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        buckets[tuple(row.get(key) for key in group_keys)].append(row)
+    out = []
+    for key_tuple, bucket in sorted(buckets.items(), key=lambda item: item[0]):
+        merged = {key: value for key, value in zip(group_keys, key_tuple)}
+        merged.update(aggregate_rows(bucket))
+        merged["case_count"] = int(len(bucket))
+        out.append(merged)
+    return out
+
+
+def _binary_occ_stats(pred: torch.Tensor, gt: torch.Tensor) -> dict[str, float]:
+    pred_occ = pred != sw2.EMPTY_IDX
+    gt_occ = gt != sw2.EMPTY_IDX
+    tp = int(torch.logical_and(pred_occ, gt_occ).sum().item())
+    fp = int(torch.logical_and(pred_occ, ~gt_occ).sum().item())
+    fn = int(torch.logical_and(~pred_occ, gt_occ).sum().item())
+    pred_count = int(pred_occ.sum().item())
+    gt_count = int(gt_occ.sum().item())
+    precision = float(tp / max(tp + fp, 1))
+    recall = float(tp / max(tp + fn, 1))
+    return {
+        "tp": tp,
+        "fp": fp,
+        "fn": fn,
+        "precision": precision,
+        "recall": recall,
+        "pred_occupied_count": pred_count,
+        "gt_occupied_count": gt_count,
+        "pred_gt_occupied_ratio": float(pred_count / max(gt_count, 1)),
+    }
+
+
+def _extract_q2f_query_diagnostics(sample_index: int, q2f_out: dict[str, Any]) -> list[dict[str, Any]]:
+    cache = q2f_out.get("mcqm_q2f_cache", None) if isinstance(q2f_out, dict) else None
+    if not isinstance(cache, dict):
+        return []
+    camera_order = list(cache.get("camera_order", []))
+    rows = []
+    for row in cache.get("level_rows", []) or []:
+        item = dict(row)
+        item["sample_index"] = int(sample_index)
+        camera_index = int(item.get("camera_index", -1))
+        item["camera_name"] = (
+            str(camera_order[camera_index])
+            if 0 <= camera_index < len(camera_order)
+            else None
+        )
+        rows.append(item)
+    return rows
+
+
+def _build_q2f_eval_row(
+    *,
+    sample_index: int,
+    horizon_s: int,
+    base_row: dict[str, Any],
+    q2f_row: dict[str, Any],
+    pred_base: torch.Tensor,
+    pred_q2f: torch.Tensor,
+    gt_h: torch.Tensor,
+) -> dict[str, Any]:
+    base_binary = _binary_occ_stats(pred_base, gt_h)
+    q2f_binary = _binary_occ_stats(pred_q2f, gt_h)
+    return {
+        "sample_index": int(sample_index),
+        "horizon_s": int(horizon_s),
+        "baseline_vs_q2f_bypass_equal": True,
+        "q2f_bypass_repeat_equal": True,
+        "baseline_occupied_iou": float(base_row["occupied_iou"]),
+        "q2f_occupied_iou": float(q2f_row["occupied_iou"]),
+        "delta_iou": float(q2f_row["occupied_iou"] - base_row["occupied_iou"]),
+        "baseline_false_free_rate": float(base_row["false_free_rate"]),
+        "q2f_false_free_rate": float(q2f_row["false_free_rate"]),
+        "delta_false_free_rate": float(q2f_row["false_free_rate"] - base_row["false_free_rate"]),
+        "baseline_front_false_free": float(base_row["front_sector_false_free"]),
+        "q2f_front_false_free": float(q2f_row["front_sector_false_free"]),
+        "delta_front_false_free": float(q2f_row["front_sector_false_free"] - base_row["front_sector_false_free"]),
+        "baseline_tp": int(base_binary["tp"]),
+        "baseline_fp": int(base_binary["fp"]),
+        "baseline_fn": int(base_binary["fn"]),
+        "q2f_tp": int(q2f_binary["tp"]),
+        "q2f_fp": int(q2f_binary["fp"]),
+        "q2f_fn": int(q2f_binary["fn"]),
+        "delta_tp": int(q2f_binary["tp"] - base_binary["tp"]),
+        "delta_fp": int(q2f_binary["fp"] - base_binary["fp"]),
+        "delta_fn": int(q2f_binary["fn"] - base_binary["fn"]),
+        "baseline_precision": float(base_binary["precision"]),
+        "baseline_recall": float(base_binary["recall"]),
+        "q2f_precision": float(q2f_binary["precision"]),
+        "q2f_recall": float(q2f_binary["recall"]),
+        "baseline_pred_occupied_count": int(base_binary["pred_occupied_count"]),
+        "q2f_pred_occupied_count": int(q2f_binary["pred_occupied_count"]),
+        "gt_occupied_count": int(base_binary["gt_occupied_count"]),
+        "baseline_pred_gt_occupied_ratio": float(base_binary["pred_gt_occupied_ratio"]),
+        "q2f_pred_gt_occupied_ratio": float(q2f_binary["pred_gt_occupied_ratio"]),
+    }
+
+
+def _run_q2f_eval_window(
+    sample_start: int,
+    sample_end: int,
+    checkpoint_path: str | Path,
+    *,
+    runtime_overrides: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    sectors = get_sector_masks_cached()
+    cfg, dataset_q2f, model_q2f, q2f_runtime_meta, materialized = build_q2f_runtime(
+        train=False,
+        checkpoint_path=checkpoint_path,
+        sample_start=sample_start,
+        sample_end=sample_end,
+    )
+    _ = cfg
+    pair_rows = build_pairs(dataset_q2f, sample_start, sample_end)
+    eval_rows = []
+    parity_rows = []
+    query_diagnostics = []
+    for pair in pair_rows:
+        prev_index = int(pair["prev_index"])
+        curr_index = int(pair["curr_index"])
+        sample_raw, curr_clean_batch = extract_inputs(dataset_q2f, curr_index)
+        _, prev_batch = extract_inputs(dataset_q2f, prev_index)
+        prev_batch = enrich_batch_scene_meta(prev_batch, dataset_q2f, prev_index)
+        curr_clean_batch = enrich_batch_scene_meta(curr_clean_batch, dataset_q2f, curr_index)
+        curr_deg_batch, _ = apply_perturbation_with_manifest_to_batch(
+            copy.deepcopy(curr_clean_batch),
+            "A10_drop_front_triplet",
+        )
+        prev_cuda = sw2.move_to_cuda(prev_batch)
+        curr_deg_cuda = sw2.move_to_cuda(curr_deg_batch)
+
+        seed_q2f_memory_from_previous_frame(model_q2f, prev_cuda)
+        base_out = run_q2f_current_frame_forward(
+            model_q2f,
+            curr_deg_cuda,
+            mode="disabled",
+            runtime_overrides=runtime_overrides,
+        )
+        seed_q2f_memory_from_previous_frame(model_q2f, prev_cuda)
+        q2f_bypass_run1_out = run_q2f_current_frame_forward(
+            model_q2f,
+            curr_deg_cuda,
+            mode="bypass",
+            runtime_overrides=runtime_overrides,
+        )
+        seed_q2f_memory_from_previous_frame(model_q2f, prev_cuda)
+        q2f_bypass_run2_out = run_q2f_current_frame_forward(
+            model_q2f,
+            curr_deg_cuda,
+            mode="bypass",
+            runtime_overrides=runtime_overrides,
+        )
+        parity_record = build_q2f_eval_parity_record(
+            curr_index,
+            sw2.extract_standard_tensors(sw2.unwrap(sample_raw), base_out)[0],
+            sw2.extract_standard_tensors(sw2.unwrap(sample_raw), q2f_bypass_run1_out)[0],
+            sw2.extract_standard_tensors(sw2.unwrap(sample_raw), q2f_bypass_run2_out)[0],
+        )
+        parity_rows.append(parity_record)
+        if not bool(parity_record["all_horizons_equal"]):
+            raise RuntimeError(
+                "Q2F eval parity failed: baseline degraded path != Q2F bypass path "
+                "or repeated bypass runs differ "
+                f"at sample {curr_index}"
+            )
+        seed_q2f_memory_from_previous_frame(model_q2f, prev_cuda)
+        q2f_out = run_q2f_current_frame_forward(
+            model_q2f,
+            curr_deg_cuda,
+            mode="active",
+            runtime_overrides=runtime_overrides,
+        )
+        query_diagnostics.extend(_extract_q2f_query_diagnostics(curr_index, q2f_out))
+        pred_temporal_base, gt_temporal, _ = sw2.extract_standard_tensors(sw2.unwrap(sample_raw), base_out)
+        pred_temporal_q2f, _, _ = sw2.extract_standard_tensors(sw2.unwrap(sample_raw), q2f_out)
+        for horizon_s in CORE_HORIZONS:
+            pred_base = pred_temporal_base[horizon_s].cpu()
+            pred_q2f = pred_temporal_q2f[horizon_s].cpu()
+            gt_h = gt_temporal[horizon_s].cpu()
+            gt0 = gt_temporal[0].cpu()
+            base_row = sw12b.build_eval_row(pred_base, gt_h, gt0, "A10_drop_front_triplet", horizon_s, sectors, baseline_pred=None)
+            q2f_row = sw12b.build_eval_row(pred_q2f, gt_h, gt0, "A10_drop_front_triplet", horizon_s, sectors, baseline_pred=None)
+            eval_rows.append(
+                _build_q2f_eval_row(
+                    sample_index=curr_index,
+                    horizon_s=horizon_s,
+                    base_row=base_row,
+                    q2f_row=q2f_row,
+                    pred_base=pred_base,
+                    pred_q2f=pred_q2f,
+                    gt_h=gt_h,
+                )
+            )
+    return {
+        "sample_start": int(sample_start),
+        "sample_end": int(sample_end),
+        "checkpoint_path": str(resolve_checkpoint_path(checkpoint_path)),
+        "checkpoint_sha256": file_sha256(resolve_checkpoint_path(checkpoint_path)),
+        "q2f_runtime_meta": q2f_runtime_meta,
+        "materialized": materialized,
+        "runtime_overrides": dict(runtime_overrides or {}),
+        "parity_rows": parity_rows,
+        "summary": aggregate_rows(eval_rows),
+        "horizon_summary": _aggregate_rows_by_keys(eval_rows, ["horizon_s"]),
+        "sample_summary": _aggregate_rows_by_keys(eval_rows, ["sample_index"]),
+        "rows": eval_rows,
+        "query_diagnostics": query_diagnostics,
+    }
+
+
+def _float_equal(a: Any, b: Any, *, tol: float = 1e-10) -> bool:
+    if isinstance(a, bool) or isinstance(b, bool):
+        return bool(a) == bool(b)
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return abs(float(a) - float(b)) <= tol
+    return a == b
+
+
+def _compare_eval_payloads_exact(
+    actual_eval: dict[str, Any],
+    expected_eval: dict[str, Any],
+    actual_parity: list[dict[str, Any]],
+    expected_parity: list[dict[str, Any]],
+) -> dict[str, Any]:
+    mismatches = []
+    for key, expected_value in expected_eval.get("summary", {}).items():
+        actual_value = actual_eval.get("summary", {}).get(key)
+        if not _float_equal(actual_value, expected_value):
+            mismatches.append({
+                "scope": "summary",
+                "key": key,
+                "expected": expected_value,
+                "actual": actual_value,
+            })
+    actual_rows = actual_eval.get("rows", [])
+    expected_rows = expected_eval.get("rows", [])
+    if len(actual_rows) != len(expected_rows):
+        mismatches.append({
+            "scope": "rows",
+            "reason": "row_count_mismatch",
+            "expected": len(expected_rows),
+            "actual": len(actual_rows),
+        })
+    else:
+        for row_index, (actual_row, expected_row) in enumerate(zip(actual_rows, expected_rows)):
+            for key, expected_value in expected_row.items():
+                actual_value = actual_row.get(key)
+                if not _float_equal(actual_value, expected_value):
+                    mismatches.append({
+                        "scope": "row",
+                        "row_index": row_index,
+                        "key": key,
+                        "expected": expected_value,
+                        "actual": actual_value,
+                    })
+                    break
+    if len(actual_parity) != len(expected_parity):
+        mismatches.append({
+            "scope": "parity_rows",
+            "reason": "parity_count_mismatch",
+            "expected": len(expected_parity),
+            "actual": len(actual_parity),
+        })
+    else:
+        for row_index, (actual_row, expected_row) in enumerate(zip(actual_parity, expected_parity)):
+            if actual_row.get("all_horizons_equal") != expected_row.get("all_horizons_equal"):
+                mismatches.append({
+                    "scope": "parity",
+                    "row_index": row_index,
+                    "key": "all_horizons_equal",
+                    "expected": expected_row.get("all_horizons_equal"),
+                    "actual": actual_row.get("all_horizons_equal"),
+                })
+                continue
+            for horizon_index, (actual_h, expected_h) in enumerate(zip(actual_row.get("rows", []), expected_row.get("rows", []))):
+                for key, expected_value in expected_h.items():
+                    actual_value = actual_h.get(key)
+                    if not _float_equal(actual_value, expected_value):
+                        mismatches.append({
+                            "scope": "parity_horizon",
+                            "row_index": row_index,
+                            "horizon_index": horizon_index,
+                            "key": key,
+                            "expected": expected_value,
+                            "actual": actual_value,
+                        })
+                        break
+    return {
+        "passed": not mismatches,
+        "mismatches": mismatches[:200],
+    }
+
+
+def _query_diag_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    if not rows:
+        return {
+            "retained_query_ratio": None,
+            "support_ratio": None,
+            "dynamic_query_ratio": None,
+            "mean_confidence": None,
+        }
+    def _mean(field: str) -> float | None:
+        vals = [float(row[field]) for row in rows if row.get(field) is not None]
+        return float(np.mean(vals)) if vals else None
+    return {
+        "retained_query_ratio": _mean("retained_query_ratio"),
+        "support_ratio": _mean("support_ratio"),
+        "dynamic_query_ratio": _mean("dynamic_query_ratio"),
+        "mean_confidence": _mean("mean_confidence"),
+    }
+
+
+def _sample_group_summary(
+    *,
+    experiment_id: str,
+    mode: str,
+    rows: list[dict[str, Any]],
+    query_diagnostics: list[dict[str, Any]],
+    sample_ids: set[int],
+) -> dict[str, Any]:
+    group_rows = [row for row in rows if int(row["sample_index"]) in sample_ids]
+    group_diag = [row for row in query_diagnostics if int(row["sample_index"]) in sample_ids]
+    horizon_summary = _aggregate_rows_by_keys(group_rows, ["horizon_s"])
+    diag_summary = _query_diag_summary(group_diag)
+    return {
+        "experiment_id": str(experiment_id),
+        "mode": str(mode),
+        "sample_count": int(len({int(row["sample_index"]) for row in group_rows})),
+        "mean_delta_iou": float(np.mean([row["delta_iou"] for row in group_rows])) if group_rows else None,
+        "horizon_delta_iou": {
+            str(item["horizon_s"]): item.get("mean_delta_iou")
+            for item in horizon_summary
+        },
+        "support_ratio": diag_summary["support_ratio"],
+        "dynamic_query_ratio": diag_summary["dynamic_query_ratio"],
+        "mean_confidence": diag_summary["mean_confidence"],
+        "retained_query_ratio": diag_summary["retained_query_ratio"],
+    }
 
 def build_q2f_train_checkpoint_path(iters: int) -> Path:
     out_dir = Q2F_ARTIFACTS_DIR / "checkpoints"
@@ -6794,6 +7159,569 @@ def run_q2f_eval(
         },
     )
     return result
+
+
+def _query_filter_runtime_overrides(
+    *,
+    mode: str,
+    query_confidence_low: float,
+    query_confidence_high: float,
+    dynamic_query_weight: float,
+    query_cell_topk: int,
+    query_projection_min_depth: float,
+    dump_query_filter_diagnostics: bool,
+) -> dict[str, Any]:
+    return {
+        "query_filter_mode": str(mode),
+        "query_confidence_low": float(query_confidence_low),
+        "query_confidence_high": float(query_confidence_high),
+        "dynamic_query_weight": float(dynamic_query_weight),
+        "query_cell_topk": int(query_cell_topk),
+        "query_projection_min_depth": float(query_projection_min_depth),
+        "dump_query_filter_diagnostics": bool(dump_query_filter_diagnostics),
+    }
+
+
+def _find_checkpoint_with_sha(search_dir: Path, expected_sha256: str) -> Path | None:
+    for path in sorted(search_dir.glob("*.pth")):
+        if file_sha256(path) == expected_sha256:
+            return path
+    return None
+
+
+def _mode_active_components(mode: str) -> list[str]:
+    mapping = {
+        "none": [],
+        "geom": ["geom"],
+        "confidence": ["geom", "confidence"],
+        "static_only": ["geom", "static_only"],
+        "dynamic_downweight": ["geom", "dynamic_downweight"],
+        "cell_topk": ["geom", "confidence", "cell_topk"],
+        "combined_verified": ["geom", "confidence", "dynamic_downweight", "cell_topk"],
+    }
+    return list(mapping.get(mode, []))
+
+
+def _build_mode_comparison(
+    experiments: list[dict[str, Any]],
+    failure_group_summary: list[dict[str, Any]],
+    success_group_summary: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    base = next((item for item in experiments if item.get("experiment_id") == "E0" and item.get("status") == "completed"), None)
+    if base is None:
+        return []
+    base_windows = {
+        (int(window["sample_start"]), int(window["sample_end"])): window
+        for window in base.get("windows", [])
+    }
+    base_failure = {
+        item["experiment_id"]: item for item in failure_group_summary
+    }.get("E0", {})
+    base_success = {
+        item["experiment_id"]: item for item in success_group_summary
+    }.get("E0", {})
+    comparisons = []
+    for experiment in experiments:
+        if experiment.get("experiment_id") == "E0" or experiment.get("status") != "completed":
+            continue
+        item = {
+            "experiment_id": experiment["experiment_id"],
+            "mode": experiment["mode"],
+        }
+        query_rows = []
+        for window in experiment.get("windows", []):
+            key = (int(window["sample_start"]), int(window["sample_end"]))
+            base_window = base_windows.get(key)
+            if base_window is None:
+                continue
+            label = f"window{key[0]}_{key[1]}"
+            item[f"{label}_delta_vs_E0_iou"] = float(window["summary"].get("mean_delta_iou", 0.0) - base_window["summary"].get("mean_delta_iou", 0.0))
+            item[f"{label}_delta_false_free_vs_E0"] = float(
+                window["summary"].get("mean_delta_false_free_rate", 0.0)
+                - base_window["summary"].get("mean_delta_false_free_rate", 0.0)
+            )
+            item[f"{label}_delta_front_false_free_vs_E0"] = float(
+                window["summary"].get("mean_delta_front_false_free", 0.0)
+                - base_window["summary"].get("mean_delta_front_false_free", 0.0)
+            )
+            horizon_base = {int(row["horizon_s"]): row for row in base_window.get("horizon_summary", [])}
+            for row in window.get("horizon_summary", []):
+                horizon = int(row["horizon_s"])
+                if horizon not in horizon_base:
+                    continue
+                item[f"{horizon}s_delta_vs_E0"] = float(
+                    row.get("mean_delta_iou", 0.0) - horizon_base[horizon].get("mean_delta_iou", 0.0)
+                )
+            query_rows.extend(window.get("query_diagnostics", []))
+        failure_item = {row["experiment_id"]: row for row in failure_group_summary}.get(experiment["experiment_id"], {})
+        success_item = {row["experiment_id"]: row for row in success_group_summary}.get(experiment["experiment_id"], {})
+        if failure_item and base_failure:
+            item["failure_group_delta_vs_E0_iou"] = float(
+                float(failure_item.get("mean_delta_iou") or 0.0)
+                - float(base_failure.get("mean_delta_iou") or 0.0)
+            )
+        if success_item and base_success:
+            item["success_group_delta_vs_E0_iou"] = float(
+                float(success_item.get("mean_delta_iou") or 0.0)
+                - float(base_success.get("mean_delta_iou") or 0.0)
+            )
+        query_summary = _query_diag_summary(query_rows)
+        base_query_summary = _query_diag_summary(
+            [row for window in base.get("windows", []) for row in window.get("query_diagnostics", [])]
+        )
+        item["retained_query_ratio"] = query_summary["retained_query_ratio"]
+        item["support_ratio_change"] = (
+            None
+            if query_summary["support_ratio"] is None or base_query_summary["support_ratio"] is None
+            else float(query_summary["support_ratio"] - base_query_summary["support_ratio"])
+        )
+        comparisons.append(item)
+    return comparisons
+
+
+def _write_query_filter_ablation_report(path: Path, payload: dict[str, Any]) -> None:
+    lines = [
+        "# Query Filter Ablation Report",
+        "",
+        "## 1. 修改文件",
+    ]
+    for file_path in payload.get("modified_files", []):
+        lines.append(f"- `{file_path}`")
+    lines.extend([
+        "",
+        "## 2. 原始Q2F入口和tensor shape",
+    ])
+    for item in payload.get("entry_audit", []):
+        lines.append(f"- `{item['label']}`: `{item['path']}` / `{item['function']}` / `{item['shape']}`")
+    meta = payload.get("metadata_availability", {})
+    lines.extend([
+        "",
+        "## 3. confidence与dynamic元数据是否真实存在",
+        f"- confidence: `{meta.get('query_confidence', {}).get('available')}` / `{meta.get('query_confidence', {}).get('source_field')}` / `{meta.get('query_confidence', {}).get('semantics')}`",
+        f"- dynamic: `{meta.get('query_dynamic_state', {}).get('available')}` / `{meta.get('query_dynamic_state', {}).get('source_field')}` / `{meta.get('query_dynamic_state', {}).get('semantics')}`",
+        "",
+        "## 4. none模式复现",
+        f"- passed: `{payload.get('none_reproduction', {}).get('passed')}`",
+        f"- window_50_69_match: `{payload.get('none_reproduction', {}).get('window_50_69_match')}`",
+        f"- window_70_89_match: `{payload.get('none_reproduction', {}).get('window_70_89_match')}`",
+        "",
+        "## 5. 各筛选mode结果",
+    ])
+    for experiment in payload.get("experiments", []):
+        lines.append(
+            f"- `{experiment['experiment_id']}` / `{experiment['mode']}` / `{experiment['status']}`"
+        )
+        for window in experiment.get("windows", []):
+            lines.append(
+                f"  - `{window['sample_start']}-{window['sample_end']}` mean ΔIoU: `{window['summary'].get('mean_delta_iou')}`"
+            )
+    lines.extend([
+        "",
+        "## 6. 50–69与70–89对比",
+    ])
+    for item in payload.get("mode_comparison", []):
+        lines.append(
+            f"- `{item['mode']}`: 50-69 `{item.get('window50_69_delta_vs_E0_iou')}`, 70-89 `{item.get('window70_89_delta_vs_E0_iou')}`"
+        )
+    lines.extend([
+        "",
+        "## 7. 稳定失败组与稳定成功组对比",
+    ])
+    for item in payload.get("stable_failure_group_summary", []):
+        lines.append(
+            f"- failure `{item['mode']}` mean ΔIoU `{item.get('mean_delta_iou')}`"
+        )
+    for item in payload.get("stable_success_group_summary", []):
+        lines.append(
+            f"- success `{item['mode']}` mean ΔIoU `{item.get('mean_delta_iou')}`"
+        )
+    lines.extend([
+        "",
+        "## 8. query统计与性能的对应关系",
+    ])
+    for item in payload.get("mode_comparison", []):
+        lines.append(
+            f"- `{item['mode']}` retained `{item.get('retained_query_ratio')}` / support change `{item.get('support_ratio_change')}`"
+        )
+    decision = payload.get("decision", {})
+    lines.extend([
+        "",
+        "## 9. 第一阶段是否通过",
+        f"- `{decision.get('query_filtering_supported')}`",
+        "",
+        "## 10. 是否执行第二阶段",
+        f"- `{payload.get('second_stage', {}).get('executed', False)}`",
+        "",
+        "## 11. 下一步决策",
+        f"- best_mode: `{decision.get('best_mode')}`",
+        f"- recommended_next_step: `{decision.get('recommended_next_step')}`",
+    ])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def run_query_filter_ablation(
+    *,
+    checkpoint_path: str | Path | None,
+    query_confidence_low: float,
+    query_confidence_high: float,
+    dynamic_query_weight: float,
+    query_cell_topk: int,
+    query_projection_min_depth: float,
+    dump_query_filter_diagnostics: bool,
+) -> dict[str, Any]:
+    query_filter_dir = QUERY_FILTER_ABLATION_DIR
+    query_filter_dir.mkdir(parents=True, exist_ok=True)
+    expected_seed17_sha = "b140098c6cedd496619f17a9fef2d29125d04807476e1d45c421e52bf603017f"
+    default_checkpoint_path = resolve_checkpoint_path(
+        checkpoint_path or build_q2f_train_checkpoint_path(15)
+    )
+    resolved_checkpoint_path = _find_checkpoint_with_sha(
+        default_checkpoint_path.parent,
+        expected_seed17_sha,
+    ) or default_checkpoint_path
+    actual_checkpoint_sha = file_sha256(resolved_checkpoint_path) if resolved_checkpoint_path.exists() else ""
+    failure_group = {71, 72, 73, 74, 75, 76, 77, 78, 80, 81, 82}
+    success_group = {55, 56, 60, 83, 84, 85, 87, 88}
+    blocking_issues = []
+    metadata_availability = {
+        "query_confidence": {
+            "available": True,
+            "source_field": "MemoryFrameState.confidence",
+            "semantics": "sigmoid(mean cls logits) amax over classes in [0,1]",
+        },
+        "query_dynamic_state": {
+            "available": True,
+            "source_field": "MemoryFrameState.dominant_class",
+            "semantics": "class-based dynamic/static via DYNAMIC_CLASS_IDS in mcqm.py",
+        },
+    }
+    entry_audit = [
+        {
+            "label": "memory query input",
+            "path": "external/SparseWorld/mmdet3d/models/sparsedetectors/sparseworld_4d_traj.py",
+            "function": "_mcqm_q2f_memory_state/_mcqm_extract_memory_state",
+            "shape": "query_feat [Q,32], refine_points [Q,P,3]",
+        },
+        {
+            "label": "projection and scatter",
+            "path": "external/SparseWorld/mmdet3d/models/sparsedetectors/sparseworld_4d_traj.py",
+            "function": "_mcqm_q2f_reconstruct_shallow_feature",
+            "shape": "coords [1,Q,P,2], weights [1,Q,P], sparse_feature [1,C,H,W]",
+        },
+        {
+            "label": "bilinear scatter",
+            "path": "external/SparseWorld/mmdet3d/models/sparsedetectors/mcqm.py",
+            "function": "bilinear_splat_features",
+            "shape": "features [B,Q,P,C], coords [B,Q,P,2], weights [B,Q,P]",
+        },
+        {
+            "label": "hard replacement",
+            "path": "external/SparseWorld/mmdet3d/models/sparsedetectors/sparseworld_4d_traj.py",
+            "function": "_mcqm_q2f_shallow_hook_context",
+            "shape": "working[:,0,failed] = raw_reconstructed[:,failed]",
+        },
+        {
+            "label": "eval json rows",
+            "path": "scripts/lidar_system_algorithm/sparseworld_mainline/stage_mcqm_motion_compensated_query_memory/run_mcqm_main.py",
+            "function": "_run_q2f_eval_window/run_query_filter_ablation",
+            "shape": "rows per sample x horizon with parity and query diagnostics",
+        },
+    ]
+    payload = {
+        "task": "query_filter_ablation_before_q2f",
+        "checkpoint": {
+            "seed": 17,
+            "iteration": 15,
+            "path": str(resolved_checkpoint_path),
+            "sha256": actual_checkpoint_sha,
+        },
+        "protocol": {
+            "base_protocol": MCQM_Q2F_PROTOCOL_VERSION,
+            "query_filter_only": True,
+            "decoder_changed": False,
+            "hard_replacement_changed": False,
+            "base_model_changed": False,
+        },
+        "metadata_availability": metadata_availability,
+        "none_reproduction": {
+            "passed": False,
+            "window_50_69_match": False,
+            "window_70_89_match": False,
+            "mismatches": [],
+        },
+        "experiments": [],
+        "stable_failure_group_summary": [],
+        "stable_success_group_summary": [],
+        "mode_comparison": [],
+        "decision": {
+            "best_mode": None,
+            "best_mode_reason": "",
+            "query_filtering_supported": False,
+            "recommended_next_step": "",
+            "blocking_issues": blocking_issues,
+            "information_gaps": [],
+        },
+        "second_stage": {
+            "executed": False,
+            "seed_results": [],
+        },
+        "modified_files": [
+            "external/SparseWorld/mmdet3d/models/sparsedetectors/mcqm.py",
+            "external/SparseWorld/mmdet3d/models/sparsedetectors/sparseworld_4d_traj.py",
+            "scripts/lidar_system_algorithm/sparseworld_mainline/stage_mcqm_motion_compensated_query_memory/run_mcqm_main.py",
+            "tests/sparseworld_mainline/stage_mcqm_motion_compensated_query_memory/test_mcqm_geometry.py",
+        ],
+        "entry_audit": entry_audit,
+    }
+    if actual_checkpoint_sha != expected_seed17_sha:
+        blocking_issues.append({
+            "type": "checkpoint_sha_mismatch",
+            "expected_sha256": expected_seed17_sha,
+            "actual_sha256": actual_checkpoint_sha,
+            "path": str(resolved_checkpoint_path),
+        })
+        payload["decision"]["recommended_next_step"] = (
+            "restore the seed17 iter15 checkpoint with SHA "
+            f"{expected_seed17_sha} and rerun query_filter_ablation"
+        )
+        json_path = query_filter_dir / "query_filter_ablation_seed17_iter0015.json"
+        report_path = query_filter_dir / "query_filter_ablation_report.md"
+        write_json(json_path, payload)
+        _write_query_filter_ablation_report(report_path, payload)
+        return payload
+
+    experiment_specs = [
+        ("E0", "none"),
+        ("E1", "geom"),
+        ("E5", "cell_topk"),
+        ("E2", "confidence"),
+        ("E3", "static_only"),
+        ("E4", "dynamic_downweight"),
+        ("E6", "combined_verified"),
+    ]
+    reference_eval_paths = {
+        (50, 69): Q2F_ARTIFACTS_DIR / "q2f_eval_iter0015_window50_69_seed17.json",
+        (70, 89): Q2F_ARTIFACTS_DIR / "q2f_eval_iter0015_window70_89_seed17.json",
+    }
+    reference_parity_paths = {
+        (50, 69): Q2F_ARTIFACTS_DIR / "q2f_eval_parity_iter0015_window50_69_seed17.json",
+        (70, 89): Q2F_ARTIFACTS_DIR / "q2f_eval_parity_iter0015_window70_89_seed17.json",
+    }
+    window_ranges = [(50, 69), (70, 89)]
+    base_experiment = None
+    for experiment_id, mode in experiment_specs:
+        runtime_overrides = _query_filter_runtime_overrides(
+            mode=mode,
+            query_confidence_low=query_confidence_low,
+            query_confidence_high=query_confidence_high,
+            dynamic_query_weight=dynamic_query_weight,
+            query_cell_topk=query_cell_topk,
+            query_projection_min_depth=query_projection_min_depth,
+            dump_query_filter_diagnostics=dump_query_filter_diagnostics,
+        )
+        experiment = {
+            "experiment_id": experiment_id,
+            "mode": mode,
+            "status": "completed",
+            "skip_reason": None,
+            "active_components": _mode_active_components(mode),
+            "parameters": runtime_overrides,
+            "windows": [],
+        }
+        if base_experiment is not None and not payload["none_reproduction"]["passed"]:
+            experiment["status"] = "skipped"
+            experiment["skip_reason"] = "none_reproduction_failed"
+            payload["experiments"].append(experiment)
+            continue
+        for sample_start, sample_end in window_ranges:
+            window_result = _run_q2f_eval_window(
+                sample_start,
+                sample_end,
+                resolved_checkpoint_path,
+                runtime_overrides=runtime_overrides,
+            )
+            experiment["windows"].append(window_result)
+            if mode == "none":
+                comparison = _compare_eval_payloads_exact(
+                    window_result,
+                    read_json(reference_eval_paths[(sample_start, sample_end)]),
+                    window_result["parity_rows"],
+                    read_json(reference_parity_paths[(sample_start, sample_end)])["rows"],
+                )
+                payload["none_reproduction"][f"window_{sample_start}_{sample_end}_match"] = bool(comparison["passed"])
+                payload["none_reproduction"]["mismatches"].extend(comparison["mismatches"])
+        payload["experiments"].append(experiment)
+        if mode == "none":
+            payload["none_reproduction"]["passed"] = bool(
+                payload["none_reproduction"]["window_50_69_match"]
+                and payload["none_reproduction"]["window_70_89_match"]
+            )
+            base_experiment = experiment
+            if not payload["none_reproduction"]["passed"]:
+                blocking_issues.append({
+                    "type": "none_reproduction_failed",
+                    "mismatches": payload["none_reproduction"]["mismatches"][:50],
+                })
+                break
+
+    all_rows = {
+        experiment["experiment_id"]: [
+            row
+            for window in experiment.get("windows", [])
+            for row in window.get("rows", [])
+        ]
+        for experiment in payload["experiments"]
+        if experiment.get("status") == "completed"
+    }
+    all_query_diag = {
+        experiment["experiment_id"]: [
+            row
+            for window in experiment.get("windows", [])
+            for row in window.get("query_diagnostics", [])
+        ]
+        for experiment in payload["experiments"]
+        if experiment.get("status") == "completed"
+    }
+    payload["stable_failure_group_summary"] = [
+        _sample_group_summary(
+            experiment_id=experiment["experiment_id"],
+            mode=experiment["mode"],
+            rows=all_rows.get(experiment["experiment_id"], []),
+            query_diagnostics=all_query_diag.get(experiment["experiment_id"], []),
+            sample_ids=failure_group,
+        )
+        for experiment in payload["experiments"]
+        if experiment.get("status") == "completed"
+    ]
+    payload["stable_success_group_summary"] = [
+        _sample_group_summary(
+            experiment_id=experiment["experiment_id"],
+            mode=experiment["mode"],
+            rows=all_rows.get(experiment["experiment_id"], []),
+            query_diagnostics=all_query_diag.get(experiment["experiment_id"], []),
+            sample_ids=success_group,
+        )
+        for experiment in payload["experiments"]
+        if experiment.get("status") == "completed"
+    ]
+    payload["mode_comparison"] = _build_mode_comparison(
+        payload["experiments"],
+        payload["stable_failure_group_summary"],
+        payload["stable_success_group_summary"],
+    )
+    passed_candidates = []
+    for item in payload["mode_comparison"]:
+        if (
+            float(item.get("window70_89_delta_vs_E0_iou") or 0.0) >= 0.005
+            and float(item.get("failure_group_delta_vs_E0_iou") or 0.0) >= 0.010
+            and float(item.get("window50_69_delta_vs_E0_iou") or 0.0) >= -0.003
+        ):
+            passed_candidates.append(item)
+    if passed_candidates and not blocking_issues:
+        preferred_order = {
+            "geom": 0,
+            "cell_topk": 1,
+            "confidence": 2,
+            "dynamic_downweight": 3,
+            "static_only": 4,
+            "combined_verified": 5,
+        }
+        best = sorted(
+            passed_candidates,
+            key=lambda item: (
+                preferred_order.get(str(item["mode"]), 99),
+                -float(item.get("retained_query_ratio") or 0.0),
+                -float(item.get("window70_89_delta_vs_E0_iou") or 0.0),
+                abs(float(item.get("window50_69_delta_vs_E0_iou") or 0.0)),
+            ),
+        )[0]
+        payload["decision"]["best_mode"] = str(best["mode"])
+        payload["decision"]["best_mode_reason"] = "meets first-stage threshold with simpler rule preference"
+        payload["decision"]["query_filtering_supported"] = True
+        payload["decision"]["recommended_next_step"] = (
+            "use the best verified query filter rule in both training and inference, then retrain Q2F"
+        )
+        seed_checkpoints = [
+            (17, expected_seed17_sha, resolved_checkpoint_path),
+            (
+                23,
+                "aec6aa677ff3d0da72651794aaee176e5b335baaf295d702aa249fade794ec3d",
+                resolve_checkpoint_path(
+                    Q2F_ARTIFACTS_DIR / "checkpoints" / "mcqm_q2f_shallow_seed23_iter0015.pth"
+                ),
+            ),
+            (
+                42,
+                "811204c1994ac61a4a1f2d048f7c764fb016fd3025468582a767e2f768f8ac65",
+                resolve_checkpoint_path(
+                    Q2F_ARTIFACTS_DIR / "checkpoints" / "mcqm_q2f_shallow_seed42_iter0015.pth"
+                ),
+            ),
+        ]
+        best_runtime_overrides = _query_filter_runtime_overrides(
+            mode=str(best["mode"]),
+            query_confidence_low=query_confidence_low,
+            query_confidence_high=query_confidence_high,
+            dynamic_query_weight=dynamic_query_weight,
+            query_cell_topk=query_cell_topk,
+            query_projection_min_depth=query_projection_min_depth,
+            dump_query_filter_diagnostics=dump_query_filter_diagnostics,
+        )
+        second_stage_results = []
+        for seed, expected_sha, seed_path in seed_checkpoints:
+            actual_sha = file_sha256(seed_path)
+            if actual_sha != expected_sha:
+                blocking_issues.append({
+                    "type": "second_stage_checkpoint_sha_mismatch",
+                    "seed": int(seed),
+                    "expected_sha256": expected_sha,
+                    "actual_sha256": actual_sha,
+                    "path": str(seed_path),
+                })
+                continue
+            seed_rows = []
+            for mode_label, overrides in [("E0", _query_filter_runtime_overrides(
+                mode="none",
+                query_confidence_low=query_confidence_low,
+                query_confidence_high=query_confidence_high,
+                dynamic_query_weight=dynamic_query_weight,
+                query_cell_topk=query_cell_topk,
+                query_projection_min_depth=query_projection_min_depth,
+                dump_query_filter_diagnostics=dump_query_filter_diagnostics,
+            )), ("BEST", best_runtime_overrides)]:
+                for sample_start, sample_end in window_ranges:
+                    result = _run_q2f_eval_window(
+                        sample_start,
+                        sample_end,
+                        seed_path,
+                        runtime_overrides=overrides,
+                    )
+                    seed_rows.append({
+                        "mode_label": mode_label,
+                        "mode": str(overrides["query_filter_mode"]),
+                        "sample_start": int(sample_start),
+                        "sample_end": int(sample_end),
+                        "summary": result["summary"],
+                    })
+            second_stage_results.append({
+                "seed": int(seed),
+                "checkpoint_path": str(seed_path),
+                "checkpoint_sha256": actual_sha,
+                "results": seed_rows,
+            })
+        payload["second_stage"]["executed"] = bool(second_stage_results)
+        payload["second_stage"]["seed_results"] = second_stage_results
+    elif not blocking_issues:
+        payload["decision"]["recommended_next_step"] = (
+            "query filtering alone did not pass the first-stage threshold; next isolate feature support coverage"
+        )
+
+    json_path = query_filter_dir / "query_filter_ablation_seed17_iter0015.json"
+    report_path = query_filter_dir / "query_filter_ablation_report.md"
+    write_json(json_path, payload)
+    _write_query_filter_ablation_report(report_path, payload)
+    return payload
 
 
 def run_mcqm_q2f_preflight(sample_start: int, sample_end: int, *, dry_run: bool = False) -> dict[str, Any]:
@@ -7286,6 +8214,23 @@ def main() -> None:
                     args.sample_start,
                     args.sample_end,
                     args.checkpoint or build_q2f_train_checkpoint_path(args.iters),
+                ),
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
+        return
+    if args.mode == "query_filter_ablation":
+        print(
+            json.dumps(
+                run_query_filter_ablation(
+                    checkpoint_path=args.checkpoint or build_q2f_train_checkpoint_path(15),
+                    query_confidence_low=args.query_confidence_low,
+                    query_confidence_high=args.query_confidence_high,
+                    dynamic_query_weight=args.dynamic_query_weight,
+                    query_cell_topk=args.query_cell_topk,
+                    query_projection_min_depth=args.query_projection_min_depth,
+                    dump_query_filter_diagnostics=args.dump_query_filter_diagnostics,
                 ),
                 indent=2,
                 ensure_ascii=False,
