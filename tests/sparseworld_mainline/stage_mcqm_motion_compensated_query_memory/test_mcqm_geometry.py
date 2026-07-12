@@ -117,6 +117,8 @@ apply_mcqm_q2f_parameter_freeze = mcqm_runner_local.apply_mcqm_q2f_parameter_fre
 build_mcqm_v2_architecture_signature = mcqm_runner_local.build_mcqm_v2_architecture_signature
 mcqm_q2f_v1_cfg = mcqm_runner_local.mcqm_q2f_v1_cfg
 set_mcqm_q2f_training_mode = mcqm_runner_local.set_mcqm_q2f_training_mode
+extract_q2f_checkpoint_global_step = mcqm_runner_local.extract_q2f_checkpoint_global_step
+resolve_q2f_training_progress = mcqm_runner_local.resolve_q2f_training_progress
 _q2f_total_loss = mcqm_runner_local._q2f_total_loss
 checkpoint_state_audit_full = mcqm_runner_local.checkpoint_state_audit_full
 clone_mcqm_memory_seed_dict = mcqm_runner_local.clone_mcqm_memory_seed_dict
@@ -1760,6 +1762,20 @@ def test_set_mcqm_q2f_training_mode_keeps_base_eval_and_q2f_train():
     assert model.backbone[1].training is False
     assert model.mcqm_q2f_shallow_query_projector.training is True
     assert model.mcqm_q2f_shallow_decoder.training is True
+
+
+def test_extract_q2f_checkpoint_global_step_prefers_global_step():
+    assert extract_q2f_checkpoint_global_step({"global_step": 12, "iters": 5}) == 12
+    assert extract_q2f_checkpoint_global_step({"iters": 7}) == 7
+    with pytest.raises(RuntimeError, match="missing global step"):
+        extract_q2f_checkpoint_global_step({})
+
+
+def test_resolve_q2f_training_progress_uses_target_iter_semantics():
+    assert resolve_q2f_training_progress(5, 1) == 4
+    assert resolve_q2f_training_progress(20, 0) == 20
+    with pytest.raises(RuntimeError, match="must be greater"):
+        resolve_q2f_training_progress(5, 5)
 
 
 def test_q2f_total_loss_separates_occ_and_q2f_terms():

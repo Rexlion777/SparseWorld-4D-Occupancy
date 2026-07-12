@@ -8,6 +8,7 @@ import json
 import math
 import os
 import random
+import re
 import resource
 import sys
 import time
@@ -6406,6 +6407,48 @@ def build_q2f_train_checkpoint_path(iters: int) -> Path:
     return out_dir / f"mcqm_q2f_shallow_iter{int(iters):04d}.pth"
 
 
+def extract_q2f_checkpoint_global_step(checkpoint_meta: Any) -> int:
+    if not isinstance(checkpoint_meta, dict):
+        raise RuntimeError("Q2F resume checkpoint missing meta dictionary")
+    start_iter = int(checkpoint_meta.get("global_step", checkpoint_meta.get("iters", -1)))
+    if start_iter < 0:
+        raise RuntimeError("Q2F resume checkpoint missing global step")
+    return start_iter
+
+
+def resolve_q2f_training_progress(target_iter: int, start_iter: int) -> int:
+    target_iter = int(target_iter)
+    start_iter = int(start_iter)
+    if target_iter <= start_iter:
+        raise RuntimeError(
+            f"target_iter={target_iter} must be greater than start_iter={start_iter}"
+        )
+    return int(target_iter - start_iter)
+
+
+def infer_q2f_checkpoint_iter(checkpoint_path: str | Path) -> int | None:
+    resolved = resolve_checkpoint_path(checkpoint_path)
+    try:
+        ckpt = torch_load_compat(resolved, map_location="cpu")
+    except Exception:
+        ckpt = None
+    if isinstance(ckpt, dict):
+        meta = ckpt.get("meta", {})
+        if isinstance(meta, dict):
+            raw_step = meta.get("global_step", meta.get("iters", None))
+            if raw_step is not None:
+                try:
+                    value = int(raw_step)
+                except Exception:
+                    value = -1
+                if value >= 0:
+                    return value
+    match = re.search(r"iter(\d+)", resolved.name)
+    if match:
+        return int(match.group(1))
+    return None
+
+
 def run_q2f_training(
     sample_start: int,
     sample_end: int,
@@ -6431,19 +6474,28 @@ def run_q2f_training(
         raise RuntimeError("Q2F training found no trainable parameters")
     optimizer = torch.optim.AdamW(trainable_params, lr=lr)
     resolved_init_checkpoint = resolve_checkpoint_path(init_checkpoint or CHECKPOINT_PATH)
+    target_iter = int(iters)
+    start_iter = 0
     if checkpoint_has_q2f_state(resolved_init_checkpoint):
         ckpt = torch_load_compat(resolved_init_checkpoint, map_location="cpu")
-        if isinstance(ckpt, dict) and "optimizer" in ckpt:
-            try:
-                optimizer.load_state_dict(ckpt["optimizer"])
-            except Exception:
-                pass
+        if not isinstance(ckpt, dict):
+            raise RuntimeError("Q2F resume checkpoint must deserialize to a dictionary")
+        start_iter = extract_q2f_checkpoint_global_step(ckpt.get("meta", {}))
+        if "optimizer" not in ckpt:
+            raise RuntimeError("Q2F resume checkpoint missing optimizer state")
+        try:
+            optimizer.load_state_dict(ckpt["optimizer"])
+        except Exception as exc:
+            raise RuntimeError("failed to restore Q2F optimizer state") from exc
+    steps_this_call = resolve_q2f_training_progress(target_iter, start_iter)
     if hasattr(model, "set_epoch"):
         model.set_epoch(max(int(getattr(model, "finetune_epoch", 0)), 1))
     train_rows = []
     set_mcqm_q2f_training_mode(model)
-    for step in range(iters):
-        pair = pair_rows[step % len(pair_rows)]
+    for local_step in range(steps_this_call):
+        completed_before_step = int(start_iter + local_step)
+        global_iter = int(completed_before_step + 1)
+        pair = pair_rows[completed_before_step % len(pair_rows)]
         prev_index = int(pair["prev_index"])
         curr_index = int(pair["curr_index"])
         _, prev_batch = extract_inputs(dataset, prev_index)
@@ -6491,7 +6543,7 @@ def run_q2f_training(
         )
         train_rows.append(
             {
-                "iter": int(step),
+                "iter": int(global_iter),
                 "prev_index": prev_index,
                 "curr_index": curr_index,
                 "perturbation_id": "A10_drop_front_triplet",
@@ -6504,9 +6556,9 @@ def run_q2f_training(
                 **scalar_losses,
             }
         )
-        if (step + 1) % 5 == 0 or step == 0 or step + 1 == iters:
+        if global_iter % 5 == 0 or local_step == 0 or global_iter == target_iter:
             print(
-                f"Q2F train iter={step + 1}/{iters} loss={train_rows[-1]['loss_total']:.4f} "
+                f"Q2F train iter={global_iter}/{target_iter} loss={train_rows[-1]['loss_total']:.4f} "
                 f"support={supported_cells} valid_points={valid_points}",
                 flush=True,
             )
@@ -6516,18 +6568,23 @@ def run_q2f_training(
         runtime_meta["base_checkpoint_sha256"],
         camera_count_override=materialized["camera_count"],
     )
-    out_ckpt = build_q2f_train_checkpoint_path(iters)
+    out_ckpt = build_q2f_train_checkpoint_path(target_iter)
     save_checkpoint(
         out_ckpt,
         model,
         optimizer,
         {
             "stage": "q2f_train",
-            "iters": int(iters),
+            "iters": int(target_iter),
+            "global_step": int(target_iter),
+            "start_iter": int(start_iter),
+            "steps_this_call": int(steps_this_call),
             "lr": float(lr),
             "seed": int(seed),
             "sample_start": int(sample_start),
             "sample_end": int(sample_end),
+            "parent_checkpoint_path": str(resolved_init_checkpoint),
+            "parent_checkpoint_sha256": file_sha256(resolved_init_checkpoint),
             "q2f_protocol_version": MCQM_Q2F_PROTOCOL_VERSION,
             "mcqm_cfg": cfg,
             "selected_shallow_module_path": str(getattr(model, "mcqm_q2f_selected_module_path", "")),
@@ -6544,9 +6601,13 @@ def run_q2f_training(
     summary = aggregate_rows(train_rows)
     result = {
         "status": "completed",
-        "iters": int(iters),
+        "iters": int(target_iter),
+        "start_iter": int(start_iter),
+        "steps_this_call": int(steps_this_call),
         "sample_start": int(sample_start),
         "sample_end": int(sample_end),
+        "parent_checkpoint_path": str(resolved_init_checkpoint),
+        "parent_checkpoint_sha256": file_sha256(resolved_init_checkpoint),
         "checkpoint_path": str(out_ckpt),
         "checkpoint_sha256": file_sha256(out_ckpt),
         "materialized": materialized,
@@ -6564,6 +6625,7 @@ def run_q2f_training(
         ],
     }
     write_json(Q2F_ARTIFACTS_DIR / "q2f_train.json", result)
+    write_json(Q2F_ARTIFACTS_DIR / f"q2f_train_iter{target_iter:04d}.json", result)
     return result
 
 
@@ -6672,6 +6734,7 @@ def run_q2f_eval(
                 }
             )
     summary = aggregate_rows(eval_rows)
+    checkpoint_iter = infer_q2f_checkpoint_iter(checkpoint_path)
     write_json(
         Q2F_ARTIFACTS_DIR / "q2f_eval_parity.json",
         {
@@ -6683,8 +6746,21 @@ def run_q2f_eval(
             "rows": parity_rows,
         },
     )
+    if checkpoint_iter is not None:
+        write_json(
+            Q2F_ARTIFACTS_DIR / f"q2f_eval_parity_iter{checkpoint_iter:04d}.json",
+            {
+                "status": "passed",
+                "sample_start": int(sample_start),
+                "sample_end": int(sample_end),
+                "checkpoint_path": str(resolve_checkpoint_path(checkpoint_path)),
+                "checkpoint_sha256": file_sha256(resolve_checkpoint_path(checkpoint_path)),
+                "rows": parity_rows,
+            },
+        )
     result = {
         "status": "completed",
+        "iters": int(checkpoint_iter) if checkpoint_iter is not None else None,
         "sample_start": int(sample_start),
         "sample_end": int(sample_end),
         "checkpoint_path": str(resolve_checkpoint_path(checkpoint_path)),
@@ -6696,6 +6772,8 @@ def run_q2f_eval(
         "rows": eval_rows,
     }
     write_json(Q2F_ARTIFACTS_DIR / "q2f_eval.json", result)
+    if checkpoint_iter is not None:
+        write_json(Q2F_ARTIFACTS_DIR / f"q2f_eval_iter{checkpoint_iter:04d}.json", result)
     decision_status = "MCQM_Q2F_V1_READY_FOR_TRAINING" if float(summary.get("mean_delta_iou", 0.0)) > 0.0 else "MCQM_Q2F_V1_NOT_READY_FOR_TRAINING"
     write_json(
         Q2F_ARTIFACTS_DIR / "decision.json",
