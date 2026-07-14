@@ -1,68 +1,73 @@
-# Source-Available — All Rights Reserved
+# PolyForm Noncommercial License 1.0.0
 
-Copyright (c) 2026 Rexlion777. All Rights Reserved.
+<https://polyformproject.org/licenses/noncommercial/1.0.0>
 
-This repository is publicly visible for portfolio presentation, technical review,
-and recruitment evaluation only. It is **not open-source software**, and this
-notice does not grant an open-source license.
+## Acceptance
 
-## 1. Covered Material
+In order to get any license under these terms, you must agree to them as both strict obligations and conditions to all your licenses.
 
-This notice applies only to the original source code, experiment runners,
-evaluation logic, documentation, diagrams, visualizations, and other materials
-in this repository for which Rexlion777 owns the copyright (the "Covered
-Material").
+## Copyright License
 
-## 2. No Permission Granted
+The licensor grants you a copyright license for the software to do everything you might do with the software that would otherwise infringe the licensor's copyright in it for any permitted purpose.  However, you may only distribute the software according to [Distribution License](#distribution-license) and make changes or new works based on the software according to [Changes and New Works License](#changes-and-new-works-license).
 
-Except for rights that GitHub's Terms of Service necessarily provide to users of
-the hosting platform, and rights that cannot lawfully be restricted, no
-permission is granted to use the Covered Material.
+## Distribution License
 
-Without prior written authorization from Rexlion777, you may not:
+The licensor grants you an additional copyright license to distribute copies of the software.  Your license to distribute covers distributing the software with changes and new works permitted by [Changes and New Works License](#changes-and-new-works-license).
 
-- copy, download for reuse, reproduce, modify, translate, or create derivative
-  works from the Covered Material;
-- run, deploy, integrate, benchmark, validate, or otherwise use the Covered
-  Material in another project, product, publication, competition, service, or
-  commercial or non-commercial activity;
-- publish, redistribute, sublicense, sell, mirror, or provide the Covered
-  Material to any third party;
-- use the Covered Material, its generated assets, or substantial extracts to
-  train, fine-tune, evaluate, or build datasets for machine-learning or
-  generative-AI systems;
-- remove or alter copyright, authorship, attribution, or provenance notices;
-- represent the Covered Material, experimental results, diagrams, or
-  documentation as your own work.
+## Notices
 
-Viewing the repository does not imply permission to reproduce or reuse it. Any
-permission must be obtained in writing and may be subject to additional terms.
+You must ensure that anyone who gets a copy of any part of the software from you also gets a copy of these terms or the URL for them above, as well as copies of any plain-text lines beginning with `Required Notice:` that the licensor provided with the software.  For example:
 
-## 3. Third-Party Material
+> Required Notice: Copyright Yoyodyne, Inc. (http://example.com)
 
-The `external/SparseWorld` Git submodule, upstream SparseWorld code, nuScenes
-data, checkpoints, dependencies, third-party trademarks, and any other
-third-party material are excluded from the Covered Material. They remain
-subject to their respective owners' terms, licenses, and dataset policies. This
-notice neither grants nor restricts rights that belong to those third parties.
+## Changes and New Works License
 
-## 4. Citation and Legal Exceptions
+The licensor grants you an additional copyright license to make changes and new works based on the software for any permitted purpose.
 
-Nothing in this notice limits quotation, citation, fair use, fair dealing, or
-other rights available under applicable law. Academic or technical reference to
-this repository must clearly identify the repository and its author; citation
-alone does not grant permission to copy code or assets.
+## Patent License
 
-## 5. No Warranty
+The licensor grants you a patent license for the software that covers patent claims the licensor can license, or becomes able to license, that you would infringe by using the software.
 
-THE COVERED MATERIAL IS PROVIDED FOR VIEWING "AS IS", WITHOUT WARRANTY OF ANY
-KIND. TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE COPYRIGHT OWNER SHALL NOT BE
-LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM ACCESS TO OR USE
-OF THE COVERED MATERIAL.
+## Noncommercial Purposes
 
-## 6. Permission Requests
+Any noncommercial purpose is a permitted purpose.
 
-To request written permission, contact the repository owner through the GitHub
-profile or repository communication channels.
+## Personal Uses
 
-SPDX-License-Identifier: LicenseRef-Proprietary-All-Rights-Reserved
+Personal use for research, experiment, and testing for the benefit of public knowledge, personal study, private entertainment, hobby projects, amateur pursuits, or religious observance, without any anticipated commercial application, is use for a permitted purpose.
+
+## Noncommercial Organizations
+
+Use by any charitable organization, educational institution, public research organization, public safety or health organization, environmental protection organization, or government institution is use for a permitted purpose regardless of the source of funding or obligations resulting from the funding.
+
+## Fair Use
+
+You may have "fair use" rights for the software under the law. These terms do not limit them.
+
+## No Other Rights
+
+These terms do not allow you to sublicense or transfer any of your licenses to anyone else, or prevent the licensor from granting licenses to anyone else.  These terms do not imply any other licenses.
+
+## Patent Defense
+
+If you make any written claim that the software infringes or contributes to infringement of any patent, your patent license for the software granted under these terms ends immediately. If your company makes such a claim, your patent license ends immediately for work on behalf of your company.
+
+## Violations
+
+The first time you are notified in writing that you have violated any of these terms, or done anything with the software not covered by your licenses, your licenses can nonetheless continue if you come into full compliance with these terms, and take practical steps to correct past violations, within 32 days of receiving notice.  Otherwise, all your licenses end immediately.
+
+## No Liability
+
+***As far as the law allows, the software comes as is, without any warranty or condition, and the licensor will not be liable to you for any damages arising out of these terms or the use or nature of the software, under any kind of legal claim.***
+
+## Definitions
+
+The **licensor** is the individual or entity offering these terms, and the **software** is the software the licensor makes available under these terms.
+
+**You** refers to the individual or entity agreeing to these terms.
+
+**Your company** is any legal entity, sole proprietorship, or other kind of organization that you work for, plus all organizations that have control over, are under the control of, or are under common control with that organization.  **Control** means ownership of substantially all the assets of an entity, or the power to direct its management and policies by vote, contract, or otherwise.  Control can be direct or indirect.
+
+**Your licenses** are all the licenses granted to you for the software under these terms.
+
+**Use** means anything you do with the software requiring one of your licenses.

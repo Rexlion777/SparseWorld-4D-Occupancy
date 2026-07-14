@@ -4,13 +4,13 @@
 
 **面向真实传感器退化的鲁棒 4D Occupancy 系统算法项目。**
 
-[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](README_EN.md#authorized-local-evaluation)
+[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](README_EN.md#quick-start)
 [![Core tests](https://github.com/Rexlion777/SparseWorld-4D-Occupancy/actions/workflows/core-tests.yml/badge.svg)](https://github.com/Rexlion777/SparseWorld-4D-Occupancy/actions/workflows/core-tests.yml)
 [![Task](https://img.shields.io/badge/Task-4D%20Occupancy-7B61FF)](README_EN.md#system-at-a-glance)
 [![Dataset](https://img.shields.io/badge/Dataset-nuScenes-00A6D6)](README_EN.md#evaluation-protocol)
-[![License: Proprietary](https://img.shields.io/badge/License-All%20Rights%20Reserved-B91C1C)](LICENSE.md)
+[![License: PolyForm NC 1.0.0](https://img.shields.io/badge/License-PolyForm%20NC%201.0.0-2563EB)](LICENSE.md)
 
-> **许可声明：** 本仓库公开仅用于作品展示、技术审阅与招聘评估，不属于开源项目。未经书面授权，不得复制、修改、运行、转载、再发布、用于其他项目或用于 AI 训练。详见 [LICENSE.md](LICENSE.md)。
+> **许可声明：** 本仓库采用 [PolyForm Noncommercial 1.0.0](LICENSE.md)。允许个人学习、非商业研究、实验、修改和按许可条款分享；任何商业使用均需另行获得书面授权。第三方内容范围见 [NOTICE.md](NOTICE.md)。
 
 > 项目将研究型 SparseWorld 模型扩展为可审计感知系统：注入相机故障，追踪故障传播，使用因果时序记忆修复缺失相机特征，并同时评估恢复收益与虚假占据风险。
 
@@ -174,9 +174,7 @@ SparseWorld-4D-Occupancy/
 └── external/SparseWorld           # 上游子模块
 ```
 
-## 授权后的本地评测
-
-以下命令仅供已获得仓库所有者书面授权的评测者使用，并不构成公开使用许可。
+## 快速测试
 
 ```bash
 git clone --recurse-submodules https://github.com/Rexlion777/SparseWorld-4D-Occupancy.git
@@ -193,6 +191,6 @@ pytest -q
 
 本项目扩展自 [MSunDYY/SparseWorld](https://github.com/MSunDYY/SparseWorld)。传感器退化、因果特征记忆、评测契约、可靠性诊断与结果解读是本项目的扩展工作。`external/SparseWorld` 上游子模块、数据集、模型权重及其他第三方材料不属于本仓库专有许可的覆盖范围，仍遵循其各自条款。
 
-## 版权与使用限制
+## 许可与使用范围
 
-本仓库原创代码、实验脚本、文档、图表和可视化资产采用 **Source-Available · All Rights Reserved** 专有声明。公开可见不代表允许复用；除 GitHub 平台条款或适用法律明确赋予的权利外，未授予复制、修改、运行、分发、商用、学术复现或 AI 训练许可。完整条款见 [LICENSE.md](LICENSE.md)。
+本仓库原创代码、实验脚本、文档、图表和可视化资产采用 **PolyForm Noncommercial 1.0.0**：允许非商业学习、研究、复现、修改与分享，但商业产品、付费服务、商业部署及具有预期商业应用的使用需要单独书面授权。完整条款见 [LICENSE.md](LICENSE.md)，版权声明与第三方范围见 [NOTICE.md](NOTICE.md)。
