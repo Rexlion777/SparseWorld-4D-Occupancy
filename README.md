@@ -4,10 +4,13 @@
 
 **面向真实传感器退化的鲁棒 4D Occupancy 系统算法项目。**
 
-[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](README_EN.md#quick-start)
+[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](README_EN.md#authorized-local-evaluation)
 [![Core tests](https://github.com/Rexlion777/SparseWorld-4D-Occupancy/actions/workflows/core-tests.yml/badge.svg)](https://github.com/Rexlion777/SparseWorld-4D-Occupancy/actions/workflows/core-tests.yml)
 [![Task](https://img.shields.io/badge/Task-4D%20Occupancy-7B61FF)](README_EN.md#system-at-a-glance)
 [![Dataset](https://img.shields.io/badge/Dataset-nuScenes-00A6D6)](README_EN.md#evaluation-protocol)
+[![License: Proprietary](https://img.shields.io/badge/License-All%20Rights%20Reserved-B91C1C)](LICENSE.md)
+
+> **许可声明：** 本仓库公开仅用于作品展示、技术审阅与招聘评估，不属于开源项目。未经书面授权，不得复制、修改、运行、转载、再发布、用于其他项目或用于 AI 训练。详见 [LICENSE.md](LICENSE.md)。
 
 > 项目将研究型 SparseWorld 模型扩展为可审计感知系统：注入相机故障，追踪故障传播，使用因果时序记忆修复缺失相机特征，并同时评估恢复收益与虚假占据风险。
 
@@ -171,7 +174,9 @@ SparseWorld-4D-Occupancy/
 └── external/SparseWorld           # 上游子模块
 ```
 
-## 快速测试
+## 授权后的本地评测
+
+以下命令仅供已获得仓库所有者书面授权的评测者使用，并不构成公开使用许可。
 
 ```bash
 git clone --recurse-submodules https://github.com/Rexlion777/SparseWorld-4D-Occupancy.git
@@ -186,4 +191,8 @@ pytest -q
 
 ## 上游归属
 
-本项目扩展自 [MSunDYY/SparseWorld](https://github.com/MSunDYY/SparseWorld)。传感器退化、因果特征记忆、评测契约、可靠性诊断与结果解读是本项目的扩展工作。
+本项目扩展自 [MSunDYY/SparseWorld](https://github.com/MSunDYY/SparseWorld)。传感器退化、因果特征记忆、评测契约、可靠性诊断与结果解读是本项目的扩展工作。`external/SparseWorld` 上游子模块、数据集、模型权重及其他第三方材料不属于本仓库专有许可的覆盖范围，仍遵循其各自条款。
+
+## 版权与使用限制
+
+本仓库原创代码、实验脚本、文档、图表和可视化资产采用 **Source-Available · All Rights Reserved** 专有声明。公开可见不代表允许复用；除 GitHub 平台条款或适用法律明确赋予的权利外，未授予复制、修改、运行、分发、商用、学术复现或 AI 训练许可。完整条款见 [LICENSE.md](LICENSE.md)。

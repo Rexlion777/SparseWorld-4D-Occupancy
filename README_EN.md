@@ -4,11 +4,14 @@
 
 **A system-algorithm project for robust 4D occupancy under real sensor degradation.**
 
-[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](#quick-start)
+[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](#authorized-local-evaluation)
 [![Core tests](https://github.com/Rexlion777/SparseWorld-4D-Occupancy/actions/workflows/core-tests.yml/badge.svg)](https://github.com/Rexlion777/SparseWorld-4D-Occupancy/actions/workflows/core-tests.yml)
 [![Task](https://img.shields.io/badge/Task-4D%20Occupancy-7B61FF)](#system-at-a-glance)
 [![Dataset](https://img.shields.io/badge/Dataset-nuScenes-00A6D6)](#evaluation-protocol)
 [![Safety](https://img.shields.io/badge/Protocol-Causal%20%7C%20No%20GT%20Repair-1F9D55)](#causal-and-safety-contract)
+[![License: Proprietary](https://img.shields.io/badge/License-All%20Rights%20Reserved-B91C1C)](LICENSE.md)
+
+> **License notice:** This public repository is provided only for portfolio presentation, technical review, and recruitment evaluation. It is not open source. Copying, modification, execution, redistribution, reuse in another project, and AI training are prohibited without prior written permission. See [LICENSE.md](LICENSE.md).
 
 > The project turns a research-grade SparseWorld model into an auditable perception system: it injects camera faults, traces failure propagation, restores missing camera features from causal temporal memory, and measures both recovery and false-occupancy risk.
 
@@ -245,9 +248,11 @@ The source tree deliberately keeps substantial experiment code rather than only 
 
 Start with [CODE_MAP.md](docs/CODE_MAP.md): it separates the supported path from negative-result branches and explains which files are worth reading first.
 
-## Quick start
+## Authorized local evaluation
 
 The reliability core is intentionally independent of MMCV/MMDetection3D:
+
+The commands below are provided only to evaluators who have received written authorization from the repository owner; they do not grant public permission to use the project.
 
 ```bash
 git clone --recurse-submodules https://github.com/Rexlion777/SparseWorld-4D-Occupancy.git
@@ -266,4 +271,8 @@ The R8 numbers use the same model checkpoint, sample set, perturbation definitio
 
 ## Upstream attribution
 
-This project extends [MSunDYY/SparseWorld](https://github.com/MSunDYY/SparseWorld), which is included as a Git submodule. The reliability pipeline, perturbation analysis, causal feature-memory repair, evaluation contracts, and result interpretation in this repository are project-specific additions. Please follow the upstream repository's license and dataset terms.
+This project extends [MSunDYY/SparseWorld](https://github.com/MSunDYY/SparseWorld), which is included as a Git submodule. The reliability pipeline, perturbation analysis, causal feature-memory repair, evaluation contracts, and result interpretation in this repository are project-specific additions. The upstream submodule, datasets, checkpoints, and other third-party materials are excluded from this repository's proprietary notice and remain governed by their respective terms.
+
+## Copyright and permitted use
+
+Original code, experiment runners, documentation, diagrams, and visualization assets in this repository are published under a **Source-Available · All Rights Reserved** proprietary notice. Public visibility does not grant permission to reuse the work. Except for rights necessarily provided by GitHub's platform terms or applicable law, no permission is granted to copy, modify, execute, distribute, commercialize, reproduce academically, or use the material for AI training. See [LICENSE.md](LICENSE.md) for the complete terms.
