@@ -26,6 +26,21 @@ R8 caches the last valid same-camera FPN features and replaces only the failed f
 
 These are fault-recovery results, not nuScenes leaderboard claims. Metric definitions, causal constraints, and the frozen comparison protocol are documented in [RESULTS.md](docs/RESULTS.md).
 
+### R8 visual evidence
+
+The qualitative panels use the same frozen predictions as the metric audit. Red regions expose false-free errors; the repaired column shows what causal same-camera memory restores without reading the current clean frame or ground truth.
+
+![R8 BEV repair comparison](assets/r8/r8_bev_repair_comparison.png)
+
+<details>
+<summary><strong>Expanded 100-sample front-cap diagnostic</strong></summary>
+
+![R8 front-cap diagnostic](assets/r8/r8_frontcap_core100_diagnostic.png)
+
+![R8 recovery-density trade-off](assets/r8/sw13a_recovery_density_tradeoff.png)
+
+</details>
+
 ## System at a glance
 
 - **30 images per sample:** 5 temporal frames × 6 surround cameras.
@@ -54,6 +69,23 @@ flowchart LR
 3. **Causal feature memory** — same-camera historical FPN cache, selective repair masks, and zero-oracle runtime behavior.
 4. **Failure attribution** — region-, class-, and future-horizon analysis instead of a single aggregate score.
 5. **Engineering decision loop** — preregistered thresholds, parity checks, ablations, and explicit rejection of variants that improve feature reconstruction but not occupancy quality.
+
+## Template 1: four complementary 4D views
+
+“Template 1” is the project-specific visualization family used to inspect the same prediction from four angles. These figures are qualitative diagnostics, not manually edited predictions or leaderboard evidence.
+
+| 1. Surround observation + future occupancy | 2. Strict BEV projection |
+|---|---|
+| ![Template 1 overview](assets/template1/01_observation_future_overview.png) | ![Template 1 strict BEV](assets/template1/02_strict_bev.png) |
+| **3. Front/ego-centric view** | **4. GT vs. SparseWorld temporal rollout** |
+| ![Template 1 front view](assets/template1/03_front_view.png) | ![Template 1 GT versus prediction](assets/template1/04_gt_vs_prediction_rollout.png) |
+
+<details>
+<summary><strong>Animated future rollout</strong></summary>
+
+![Template 1 future rollout](assets/template1/template1_future_rollout.gif)
+
+</details>
 
 ## Experiment atlas: beyond R8
 
@@ -93,16 +125,21 @@ See [`src/sparseworld_reliability/feature_memory.py`](src/sparseworld_reliabilit
 SparseWorld-4D-Occupancy/
 ├── src/sparseworld_reliability/  # clean, dependency-light reliability core
 ├── tests/                        # causal, shape, and metric contracts
+├── scripts/lidar_system_algorithm/
+│   └── sparseworld_mainline/      # 30+ real experiment stages, 56k+ lines
 ├── docs/
 │   ├── ARCHITECTURE.md           # model and data flow
 │   ├── EXPERIMENTS.md            # complete hypothesis/evidence/decision map
 │   ├── RESULTS.md                # R8 protocol and result interpretation
-│   └── REPRODUCIBILITY.md        # environment and full-pipeline guidance
-├── assets/                       # result card for rapid review
+│   ├── REPRODUCIBILITY.md        # environment and full-pipeline guidance
+│   └── CODE_MAP.md               # source-level reading guide
+├── assets/                       # Template 1 and R8 evidence gallery
 └── external/SparseWorld          # upstream research code as a submodule
 ```
 
-Historical one-off runners are summarized rather than dumped into the top-level tree. The development branch preserves the full research history; this branch keeps a clean core plus an explicit experiment atlas, including unsuccessful routes and what each one taught us.
+The source tree deliberately keeps substantial experiment code rather than only presenting a polished toy module. It covers model bring-up, geometry and query-support audits, sensor-fault propagation, targeted fine-tuning, contributor routing, R8 causal feature memory, density-constrained repair, learned residual/gating attempts, MCQM query memory, and visualization generation. Repeated caches, checkpoints, generated test output, and active unfinished Robot work are excluded.
+
+Start with [CODE_MAP.md](docs/CODE_MAP.md): it separates the supported path from negative-result branches and explains which files are worth reading first.
 
 ## Quick start
 
