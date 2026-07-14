@@ -4,6 +4,15 @@
 
 This gallery contains **20 figures generated from 1,480 committed machine-readable records**. Only frozen, supported SW13A/R8 evidence is included. Ongoing learned repair, negative branches, and the active Robot workspace are not used to create these figures.
 
+## Template 1: aligned before/after video
+
+| R0 degraded native | R8 causal feature repair |
+|---|---|
+| ![Template 1 before R8](../assets/template1/r8_comparison/template1_a10_native_before_r8.gif) | ![Template 1 after R8](../assets/template1/r8_comparison/template1_a10_r8_after_r8.gif) |
+| [1280×1180 MP4](../assets/template1/r8_comparison/template1_a10_native_before_r8.mp4) | [1280×1180 MP4](../assets/template1/r8_comparison/template1_a10_r8_after_r8.mp4) |
+
+The comparison is based on one frozen A10 sample. `native_semantic` supplies the before anchors and raw `teacher_raw_semantic` from SW13A/R8 supplies the after anchors. The animation interpolates only for display between the real 0/2/4/6 s outputs.
+
 ## 1. Headline recovery and future horizons
 
 | Supported recovery summary | False-free recovery by horizon |
@@ -56,6 +65,9 @@ The density figures are intentionally shown next to false-free recovery: lowerin
 
 ```bash
 python scripts/portfolio/generate_supported_result_gallery.py
+python scripts/portfolio/generate_r8_template1_comparison.py \
+  --anchors evidence/r8_template1_sample000 \
+  --output-dir assets/template1/r8_comparison
 ```
 
 The generator reads the committed tables under [`evidence/`](../evidence/README.md). It does not require the private research repository, nuScenes images, model checkpoints, or the active Robot workspace.

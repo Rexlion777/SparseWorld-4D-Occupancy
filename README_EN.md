@@ -37,6 +37,17 @@ The qualitative panels use the same frozen predictions as the metric audit. Red 
 
 ![R8 BEV repair comparison](assets/r8/r8_bev_repair_comparison.png)
 
+## Template 1 video: before and after R8
+
+Both videos use the **same A10 front-triplet camera-loss sample**, the same frozen 0/2/4/6 s predictions, and an identical Template 1 rendering contract. The left side is the degraded native output; the right side uses causal same-camera `t−1` FPN repair. R8 does not reconstruct the black camera images—it restores historical visual evidence at feature level for the Occupancy decoder.
+
+| Before R8: degraded native | After R8: causal feature repair |
+|---|---|
+| ![Template 1 before R8](assets/template1/r8_comparison/template1_a10_native_before_r8.gif) | ![Template 1 after R8](assets/template1/r8_comparison/template1_a10_r8_after_r8.gif) |
+| [High-resolution MP4](assets/template1/r8_comparison/template1_a10_native_before_r8.mp4) | [High-resolution MP4](assets/template1/r8_comparison/template1_a10_r8_after_r8.mp4) |
+
+Each video contains 108 frames over 6 seconds. Interpolation is display-only between four genuine prediction anchors; it does not create additional model outputs. See [`evidence/r8_template1_sample000/`](evidence/r8_template1_sample000/README.md) for provenance and reproduction notes.
+
 ## Supported result atlas
 
 The expanded atlas uses only frozen SW13A/R8 evaluation data; ongoing learned-repair candidates are excluded. It broadens the evidence from one headline number to **future horizons, spatial sectors, dynamic/small objects, paired-sample stability, ablations, and risk controls**. The complete gallery contains 20 figures backed by 1,480 machine-readable records.

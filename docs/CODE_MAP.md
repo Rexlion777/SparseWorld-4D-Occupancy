@@ -19,6 +19,7 @@ The active Robot workspace is documented through a [read-only MCQM × R8 audit](
 | Review query-memory research | `stage_mcqm_motion_compensated_query_memory/` | ego-motion compensation, query-to-FPN reconstruction, contribution tests |
 | Regenerate figures | `stage_swvis1_paper_style_visualization/` and `stage_swvis4_query_support_interpolation/` | Template 1, future rollout, query-support interpolation |
 | Regenerate public result atlas | `scripts/portfolio/generate_supported_result_gallery.py` | 20 supported-result figures from committed evidence CSVs |
+| Regenerate R8 Template 1 videos | `scripts/portfolio/export_r8_template1_anchors.py` and `generate_r8_template1_comparison.py` | frozen R0/R8 anchors, aligned GIF/MP4 comparison |
 | Audit public result evidence | `evidence/raw/` and `evidence/headline_supported_results.csv` | 1,480 aggregate, paired-sample, trade-off, and headline records |
 
 ## Full experiment progression

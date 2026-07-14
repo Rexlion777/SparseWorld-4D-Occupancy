@@ -32,6 +32,17 @@ R8 缓存上一个有效时刻的同相机 FPN 特征，仅替换当前失效的
 
 ![R8 BEV repair comparison](assets/r8/r8_bev_repair_comparison.png)
 
+## R8 故障前后 Template 1 视频
+
+下面使用**同一个 A10 前向三相机缺失样本**、同一组 0/2/4/6 s 冻结预测和同一套 Template 1 渲染协议。左侧为退化原生输出，右侧为 R8 使用同相机 `t−1` FPN 特征修复后的输出；R8 不恢复黑掉的图像，而是在特征层恢复 Occupancy 所需的历史视觉证据。
+
+| R8 前：R0 degraded native | R8 后：causal feature repair |
+|---|---|
+| ![Template 1 before R8](assets/template1/r8_comparison/template1_a10_native_before_r8.gif) | ![Template 1 after R8](assets/template1/r8_comparison/template1_a10_r8_after_r8.gif) |
+| [高清 MP4](assets/template1/r8_comparison/template1_a10_native_before_r8.mp4) | [高清 MP4](assets/template1/r8_comparison/template1_a10_r8_after_r8.mp4) |
+
+视频均为 6 s、108 帧；动画只在四个真实预测锚点之间做平滑展示，不生成新的模型结果。渲染源与复现说明见 [`evidence/r8_template1_sample000/`](evidence/r8_template1_sample000/README.md)。
+
 ## 结果图谱
 
 新增图谱只使用冻结的 SW13A/R8 评测数据，不混入当前尚在验证的 learned repair。它将结果从单一 headline 扩展到 **未来时域、空间区域、动态/小目标、逐样本稳定性、消融与风险约束**；完整画廊含 20 张图和 1,480 条机器可读记录。
