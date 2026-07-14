@@ -1,0 +1,5 @@
+case,scope,metric,relative_improvement_pct,source
+A10,front triplet missing,FN count reduction,23.2,docs/RESULTS.md
+A10 @ 4 s,front triplet missing,FN count reduction,10.5,docs/RESULTS.md
+A1,front camera missing,FN count reduction,17.4,docs/RESULTS.md
+C4,motion blur,FN count reduction,7.1,docs/RESULTS.md

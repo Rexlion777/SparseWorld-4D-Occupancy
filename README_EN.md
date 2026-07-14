@@ -37,6 +37,22 @@ The qualitative panels use the same frozen predictions as the metric audit. Red 
 
 ![R8 BEV repair comparison](assets/r8/r8_bev_repair_comparison.png)
 
+## Supported result atlas
+
+The expanded atlas uses only frozen SW13A/R8 evaluation data; ongoing learned-repair candidates are excluded. It broadens the evidence from one headline number to **future horizons, spatial sectors, dynamic/small objects, paired-sample stability, ablations, and risk controls**. The complete gallery contains 20 figures backed by 1,480 machine-readable records.
+
+| Overall fault recovery | Horizon-wise FN recovery |
+|---|---|
+| ![Supported recovery summary](assets/portfolio/01_supported_recovery_summary.png) | ![A10 false-free horizons](assets/portfolio/02_a10_false_free_horizons.png) |
+| **Occupied IoU** | **Front-sector recovery** |
+| ![A10 occupied IoU](assets/portfolio/03_a10_occupied_iou.png) | ![Front-sector recovery](assets/portfolio/05_front_sector_recovery.png) |
+| **Paired-sample IoU gains** | **Paired-sample FN gains** |
+| ![Sample IoU improvement](assets/portfolio/08_sample_iou_improvement.png) | ![Sample false-free reduction](assets/portfolio/09_sample_false_free_reduction.png) |
+| **Causal R8 chain** | **Public evidence coverage** |
+| ![R8 causal pipeline](assets/portfolio/18_r8_causal_pipeline.png) | ![Public evidence coverage](assets/portfolio/20_public_evidence_coverage.png) |
+
+See the [complete 20-figure supported-result gallery](docs/SUPPORTED_RESULT_GALLERY.md) for class/horizon results, density Pareto analysis, memory-age and motion-blur ablations, risk balance, and the experiment atlas. Source CSVs and the deterministic generator live in [`evidence/`](evidence/README.md) and [`generate_supported_result_gallery.py`](scripts/portfolio/generate_supported_result_gallery.py).
+
 <details>
 <summary><strong>Expanded 100-sample front-cap diagnostic</strong></summary>
 

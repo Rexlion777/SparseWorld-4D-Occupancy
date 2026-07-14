@@ -32,6 +32,22 @@ R8 缓存上一个有效时刻的同相机 FPN 特征，仅替换当前失效的
 
 ![R8 BEV repair comparison](assets/r8/r8_bev_repair_comparison.png)
 
+## 正向结果图谱
+
+新增图谱只使用冻结的 SW13A/R8 评测数据，不混入当前尚在验证的 learned repair。它将结果从单一 headline 扩展到 **未来时域、空间区域、动态/小目标、逐样本稳定性、消融与风险约束**；完整画廊含 20 张图和 1,480 条机器可读记录。
+
+| 总体故障恢复 | 未来时域 FN 恢复 |
+|---|---|
+| ![Supported recovery summary](assets/portfolio/01_supported_recovery_summary.png) | ![A10 false-free horizons](assets/portfolio/02_a10_false_free_horizons.png) |
+| **Occupied IoU** | **前向关键区域恢复** |
+| ![A10 occupied IoU](assets/portfolio/03_a10_occupied_iou.png) | ![Front-sector recovery](assets/portfolio/05_front_sector_recovery.png) |
+| **逐样本 IoU 改善分布** | **逐样本漏检改善分布** |
+| ![Sample IoU improvement](assets/portfolio/08_sample_iou_improvement.png) | ![Sample false-free reduction](assets/portfolio/09_sample_false_free_reduction.png) |
+| **R8 因果链路** | **公开证据覆盖** |
+| ![R8 causal pipeline](assets/portfolio/18_r8_causal_pipeline.png) | ![Public evidence coverage](assets/portfolio/20_public_evidence_coverage.png) |
+
+其余类别/时域结果、密度 Pareto、memory-age 与 motion-blur 消融、风险平衡和实验图谱见 [20 图完整正向结果画廊](docs/SUPPORTED_RESULT_GALLERY.md)。原始 CSV 与图表生成器见 [`evidence/`](evidence/README.md) 和 [`generate_supported_result_gallery.py`](scripts/portfolio/generate_supported_result_gallery.py)。
+
 ## 系统概览
 
 - 每个样本 **30 张图像**：5 个时序帧 × 6 个环视相机。

@@ -14,6 +14,10 @@ All changes below are relative to the same frozen SparseWorld checkpoint under t
 
 The density interval is reported next to FN recovery because a method can trivially reduce misses by marking too much free space as occupied. R8 is evaluated as a recovery/risk pair, not by recovery alone.
 
+## Supported result gallery
+
+The public portfolio includes a [20-figure supported-result atlas](SUPPORTED_RESULT_GALLERY.md) generated from 1,480 frozen SW13A/R8 records. It covers horizon-, sector-, class-, and sample-level recovery, memory/blur ablations, density guardrails, and the causal system contract. The committed CSVs and deterministic generator make every public chart reproducible without copying the active Robot workspace.
+
 ## Frozen comparison protocol
 
 - same checkpoint and model code for native degraded and repaired runs;
