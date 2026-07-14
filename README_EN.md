@@ -179,7 +179,7 @@ F_t^{safe}=F_t^{transport}+M_Q\odot\alpha\,H\!\left(F_t^{transport},T(S(Q))-T(S(
 $$
 
 $$
-Q_t^{out}=Q_t^{base}+W_o\operatorname{Attn}\!\left(Q_t^{base},K(F_{t-1}^{clean}),V(F_{t-1}^{clean})\right),
+Q_t^{out}=Q_t^{base}+W_o\mathrm{Attn}\!\left(Q_t^{base},K(F_{t-1}^{clean}),V(F_{t-1}^{clean})\right),
 \quad W_{o,0}=0,
 $$
 

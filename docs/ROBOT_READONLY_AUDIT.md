@@ -109,7 +109,7 @@ The zero-initialized output head enforces $\Delta F=0$ before training, so the n
 ### 3.6 Distillation and task objectives / 特征蒸馏与任务目标
 
 $$
-\mathcal L_{feat}=\operatorname{SmoothL1}(F^{rec},F^{clean})
+\mathcal L_{feat}=\mathrm{SmoothL1}(F^{rec},F^{clean})
 +\lambda_{cos}\left(1-\cos(F^{rec},F^{clean})\right),
 \quad \lambda_{cos}=0.1.
 $$
@@ -132,7 +132,7 @@ If $g_{feat}^{\top}g_{task}<0$, the implementation projects the task gradient aw
 $$
 g'_{task}=g_{task}-
 \frac{g_{task}^{\top}g_{feat}}{\|g_{feat}\|^2}g_{feat},
-\qquad g=g_{feat}+\operatorname{Rescale}(g'_{task}).
+\qquad g=g_{feat}+\mathrm{Rescale}(g'_{task}).
 $$
 
 若两个目标的梯度点积为负，则投影掉任务梯度中与特征梯度相反的分量，再合并更新。
@@ -310,7 +310,7 @@ $$
 $$
 Q_{t,i}^{out}=Q_{t,i}^{base}
 +W_o\sum_{j\in\mathcal N(i)}
-\operatorname{softmax}_j(e_{ij})W_vV_{t-1,j},
+\mathrm{softmax}_j(e_{ij})W_vV_{t-1,j},
 \qquad W_{o,0}=0.
 $$
 
@@ -330,10 +330,10 @@ $$
 The practical approximation is clean-teacher logit distillation:
 
 $$
-\mathcal L_{KD}=T^2\operatorname{KL}\!\left(
-\operatorname{softmax}(z^{clean}/T)
+\mathcal L_{KD}=T^2\mathrm{KL}\!\left(
+\mathrm{softmax}(z^{clean}/T)
 \;\|\;
-\operatorname{softmax}(z^{student}/T)
+\mathrm{softmax}(z^{student}/T)
 \right).
 $$
 
