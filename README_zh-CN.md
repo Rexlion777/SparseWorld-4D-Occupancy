@@ -68,6 +68,83 @@ R8 缓存上一个有效时刻的同相机 FPN 特征，仅替换当前失效的
 
 因此，**R8 仍是当前有证据支持的主线**。Q2F、残差、传输、检索和 PCGrad 作为研究证据保留，不冒充成功提升。完整公式、因子设计和结果见 [MCQM × R8 双语只读审计](docs/ROBOT_READONLY_AUDIT.md)。
 
+### 下一代递进架构：Feature 防火墙 → 任务对齐检索
+
+下图是**递进式候选架构**，不是已证实的提升结果。它保留原有 R8 主线，并严格限定每种信息源的职责。
+
+```mermaid
+flowchart TB
+    subgraph C0["0. 坐标合同"]
+        CT["当前 clean temporal bundle"] --> CF["当前 teacher slot: t"]
+        CT --> HF["共享增强的历史 slot: t-1"]
+        IDA["强断言 resize / crop / flip 一致"] --> HF
+        IDA --> CF
+    end
+
+    subgraph C1["1. Feature 层故障防火墙"]
+        DI["当前故障图像"] --> NF["Backbone + 四层 native FPN"]
+        HF --> R8["R8 同相机特征替换"]
+        NF --> R8
+        MQ["Memory Query：仅负责几何和运动"] --> FLOW["运动补偿的局部 flow / visibility"]
+        R8 --> TRANS["Query 引导的真实 R8 Feature 搬运"]
+        FLOW --> TRANS
+        TRANS --> CEN["反事实中心化局部残差<br/>T(query)-T(zero)"]
+        CEN --> SAFE["fault-sanitized FPN"]
+    end
+
+    subgraph C2["2. Query 层时序检索"]
+        SAFE --> OPUS["OPUS Decoder"]
+        OPUS --> QB["无故障污染的 current Query"]
+        MQ --> COORD["对齐后的 reference point / 采样坐标"]
+        HF --> KV["局部多层历史证据 K/V"]
+        COORD --> KV
+        QB --> ATTN["局部历史 Dense Feature Retrieval Attention"]
+        KV --> ATTN
+        ATTN --> QOUT["current Query + 零初始化检索增量"]
+    end
+
+    subgraph C3["3. 任务对齐纠错"]
+        QOUT --> HEAD["冻结 Occupancy Head"]
+        HEAD --> ZB["R8-safe Occupancy logits"]
+        QOUT --> LR["有幅度上界的 Query / Logit residual"]
+        ZB --> ZOUT["任务对齐输出 logits"]
+        LR --> ZOUT
+        ZOUT --> OCC["0 / 2 / 4 / 6 s Occupancy"]
+        CF -. "仅训练时 clean teacher" .-> DISTILL["Logit / Decoder State 蒸馏"]
+        DISTILL -.-> ZOUT
+    end
+
+    R8 -. "已支持基线" .-> SAFE
+    classDef supported fill:#d8f3dc,stroke:#2d6a4f,stroke-width:2px,color:#081c15;
+    classDef validating fill:#fff3bf,stroke:#e67700,stroke-width:2px,color:#5f3b00;
+    classDef proposed fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#172554;
+    classDef trainonly fill:#f3e8ff,stroke:#7e22ce,stroke-width:1px,color:#3b0764;
+    class R8 supported;
+    class FLOW,TRANS,CEN,SAFE,ATTN,QOUT validating;
+    class LR,ZOUT,DISTILL proposed;
+    class CF,CT,IDA trainonly;
+```
+
+核心结构约束：
+
+\[
+F_t^{safe}=F_t^{transport}+M_Q\odot\alpha\,H\!\left(F_t^{transport},T(S(Q))-T(S(0))\right),
+\quad \alpha=\alpha_{max}\tanh(a),\ a_0=0,
+\]
+
+\[
+Q_t^{out}=Q_t^{base}+W_o\operatorname{Attn}\!\left(Q_t^{base},K(F_{t-1}^{clean}),V(F_{t-1}^{clean})\right),
+\quad W_{o,0}=0,
+\]
+
+\[
+z_t^{out}=z_t^{R8}+\beta\,\Delta z(Q_t^{out}),\quad \beta_0=0.
+\]
+
+这些结构在初始化时建立五个 no-regret 合同：严格复现 R8；Query 清零时残差为零；support 外修改为零；健康相机原样保留；关闭检索时严格退化为 Feature 路线。
+
+**创新点：** R8 负责真实视觉内容，Memory Query 负责几何与运动，current Query 仅请求局部历史证据，Logit Residual 负责最终任务修正。这避免让稀疏 Query 凭空生成 256 通道 Dense Feature，也防止 Attention 重复回放整张 `t-1` FPN。
+
 ## 项目代码与实验量
 
 仓库保留 31 个有技术递进关系的实验阶段，约 5.6 万行 Python 代码，包含：

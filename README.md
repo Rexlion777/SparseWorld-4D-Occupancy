@@ -114,6 +114,83 @@ The audit found three important engineering conclusions:
 
 Therefore, **R8 remains the supported mainline**. Full Q2F, dense residual, transport, retrieval attention, and PCGrad remain research evidence rather than claimed improvements. See the bilingual [MCQM × R8 read-only audit](docs/ROBOT_READONLY_AUDIT.md) for equations, tensor contracts, factorial design, results, and the next solution direction.
 
+### Proposed next-generation chain: feature firewall → task-aligned retrieval
+
+The following is a **progressive candidate architecture**, not a claimed result. It preserves the original R8 path while assigning each information source only the role it can reliably perform.
+
+```mermaid
+flowchart TB
+    subgraph C0["0. Coordinate contract"]
+        CT["Current clean temporal bundle"] --> CF["Current teacher slot: t"]
+        CT --> HF["Shared-augmentation history slot: t-1"]
+        IDA["Assert identical resize / crop / flip"] --> HF
+        IDA --> CF
+    end
+
+    subgraph C1["1. Feature firewall"]
+        DI["Current degraded images"] --> NF["Backbone + four-level native FPN"]
+        HF --> R8["R8 same-camera replacement"]
+        NF --> R8
+        MQ["Memory Query: geometry + motion only"] --> FLOW["Motion-compensated local flow / visibility"]
+        R8 --> TRANS["Query-guided transport of real R8 values"]
+        FLOW --> TRANS
+        TRANS --> CEN["Counterfactual-centered local residual<br/>T(query)-T(zero)"]
+        CEN --> SAFE["Fault-sanitized FPN"]
+    end
+
+    subgraph C2["2. Query-level temporal retrieval"]
+        SAFE --> OPUS["OPUS Decoder"]
+        OPUS --> QB["Fault-sanitized current Query"]
+        MQ --> COORD["Aligned reference points / sampling coordinates"]
+        HF --> KV["Small multi-level historical evidence as K/V"]
+        COORD --> KV
+        QB --> ATTN["Local historical Dense Feature Retrieval Attention"]
+        KV --> ATTN
+        ATTN --> QOUT["Current Query + zero-init retrieval delta"]
+    end
+
+    subgraph C3["3. Task-aligned correction"]
+        QOUT --> HEAD["Frozen Occupancy Head"]
+        HEAD --> ZB["R8-safe Occupancy logits"]
+        QOUT --> LR["Bounded Query / logit residual"]
+        ZB --> ZOUT["Task-aligned output logits"]
+        LR --> ZOUT
+        ZOUT --> OCC["0 / 2 / 4 / 6 s Occupancy"]
+        CF -. "training-only clean teacher" .-> DISTILL["Logit / decoder-state distillation"]
+        DISTILL -.-> ZOUT
+    end
+
+    R8 -. "supported baseline" .-> SAFE
+    classDef supported fill:#d8f3dc,stroke:#2d6a4f,stroke-width:2px,color:#081c15;
+    classDef validating fill:#fff3bf,stroke:#e67700,stroke-width:2px,color:#5f3b00;
+    classDef proposed fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#172554;
+    classDef trainonly fill:#f3e8ff,stroke:#7e22ce,stroke-width:1px,color:#3b0764;
+    class R8 supported;
+    class FLOW,TRANS,CEN,SAFE,ATTN,QOUT validating;
+    class LR,ZOUT,DISTILL proposed;
+    class CF,CT,IDA trainonly;
+```
+
+The structural contracts are:
+
+\[
+F_t^{safe}=F_t^{transport}+M_Q\odot\alpha\,H\!\left(F_t^{transport},T(S(Q))-T(S(0))\right),
+\quad \alpha=\alpha_{max}\tanh(a),\ a_0=0,
+\]
+
+\[
+Q_t^{out}=Q_t^{base}+W_o\operatorname{Attn}\!\left(Q_t^{base},K(F_{t-1}^{clean}),V(F_{t-1}^{clean})\right),
+\quad W_{o,0}=0,
+\]
+
+\[
+z_t^{out}=z_t^{R8}+\beta\,\Delta z(Q_t^{out}),\quad \beta_0=0.
+\]
+
+This creates five no-regret checks at initialization: exact R8 parity, zero Query ⇒ zero residual, support exterior ⇒ zero modification, healthy cameras unchanged, and retrieval disabled ⇒ the Feature route unchanged.
+
+**Innovation focus:** R8 carries real visual content; Memory Query predicts geometry and motion; current Query requests only local historical evidence; the logit residual corrects the final task. This avoids asking a sparse Query to synthesize an arbitrary 256-channel dense feature map and prevents duplicate replay of the full `t-1` FPN.
+
 ## Experiment atlas: beyond R8
 
 R8 is the strongest headline result, but the project is a broader systems investigation rather than a single trick. The full research sequence includes:

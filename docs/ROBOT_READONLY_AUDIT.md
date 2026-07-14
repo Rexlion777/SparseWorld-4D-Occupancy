@@ -193,7 +193,254 @@ Query 层检索分支满足零初始化一致性，历史稠密 FPN 仅作为 me
 3. Move the next correction target from dense FPN reconstruction toward Query/Occupancy-space objectives directly aligned with false-free and horizon metrics. / 后续应从稠密 FPN 重建转向 Query/Occupancy 空间，直接对齐 false-free 和未来时域指标。
 4. Preserve the factorial and preregistered protocol: E0 parity, frozen base, independent windows, stable-success/failure groups, per-horizon metrics, and clean-scene safety. / 继续保留 E0 一致性、冻结基础模型、独立窗口、稳定成功/失败组、分时域指标和 clean-scene 安全约束。
 
-## 7. Claim boundary / 结论边界
+## 7. Progressive next-generation architecture / 递进式下一代架构
+
+The original audited chain above remains unchanged. The architecture below is derived progressively from five observed failure modes: coordinate mismatch, Query-independent decoder bias, near-full-image residual pollution, underdetermined dense-feature generation, and Feature/Task objective misalignment.
+
+上文已审计链路保持不变。下图从坐标错位、Query-independent bias、近乎整图的残差污染、Dense Feature 生成不可辨识以及 Feature/Task 目标错位五个问题逐级推导候选架构。
+
+```mermaid
+flowchart LR
+    B0["Blocking bug<br/>independent previous sample has a different IDA frame"] --> B1["E1-Fix<br/>shared temporal-bundle history slot"]
+    B1 --> B2["E1-Centered<br/>T(query)-T(zero), frozen transferred trunk"]
+    B2 --> B3["E1-Local<br/>hard KxK support and zero exterior"]
+    B3 --> B4["E1-Transport<br/>Query predicts flow / visibility, not 256-D values"]
+    B4 --> B5["E1-Transport-Residual<br/>bounded R8-conditioned local correction"]
+    B5 --> Q1["E2 Retrieval<br/>sanitized current Query reads local t-1 evidence"]
+    Q1 --> Q2["E3 Composition<br/>Feature firewall + Query retrieval"]
+    Q2 --> T1["E4 Task alignment<br/>clean logit / decoder-state distillation"]
+    T1 --> T2["E5 Task-space residual<br/>Query or Occupancy-logit correction"]
+
+    classDef bug fill:#fee2e2,stroke:#dc2626,color:#450a0a;
+    classDef fixed fill:#d8f3dc,stroke:#2d6a4f,color:#081c15;
+    classDef validating fill:#fff3bf,stroke:#e67700,color:#5f3b00;
+    classDef proposed fill:#dbeafe,stroke:#2563eb,color:#172554;
+    class B0 bug;
+    class B1 fixed;
+    class B2,B3,B4,B5,Q1,Q2 validating;
+    class T1,T2 proposed;
+```
+
+### 7.1 Coordinate-contract repair / 坐标合同修复
+
+Training must source dense R8 features from the history slot inside the current clean temporal bundle:
+
+\[
+\mathcal B_t^{clean}=[I_t^{clean},I_{t-1}^{clean},\ldots],\qquad
+F_t^{teacher}=E(I_t^{clean};A),\quad
+F_{t-1}^{R8}=E(I_{t-1}^{clean};A),
+\]
+
+where the same augmentation \(A\) is shared by both slots. Memory Query may still come from an independently loaded sample because its reference points are transformed in 3D/world coordinates; dense R8 must not.
+
+训练时 Dense R8 必须从当前 clean temporal bundle 的 history slot 中提取，使 current teacher 与 R8 source 共享同一组 IDA 变换。Memory Query 因已进入三维/世界坐标，可以来自独立 previous sample；Dense Feature 不可以。
+
+Required assertions / 必须断言：
+
+```text
+train R8 source == clean bundle history slot
+IDA(current teacher) == IDA(history source)
+R8 source != degraded history
+R8 source != current teacher
+evaluation has no clean bundle and uses deterministic preprocessing
+```
+
+### 7.2 Counterfactual-centered local residual / 反事实中心化局部残差
+
+\[
+Z_q=T(S(Q),M,W),\qquad Z_0=T(0,M,W),\qquad
+\Delta F=H(Z_q-Z_0).
+\]
+
+This removes Query-independent output caused by support, confidence, convolution bias, or normalization. The residual is then constrained spatially:
+
+\[
+\Delta F_l(x)=M_l(x)\odot
+\frac{\sum_q w_q(x)\Delta F_{q,l}(x)}
+{\sum_q w_q(x)+\epsilon},
+\qquad M_l(x)=0\Rightarrow\Delta F_l(x)=0.
+\]
+
+Support is constructed once in normalized image coordinates at the highest-resolution level and area-pooled to each real lower-level size. The hard contract is:
+
+```text
+outside_support_residual_abs_max == 0
+```
+
+该设计通过 \(T(Q)-T(0)\) 从结构上消除与 Query 无关的背景输出，再用硬 support 禁止残差扩散到整张 FPN。
+
+### 7.3 Query-guided R8 Feature Transport / Query 引导的 R8 特征搬运
+
+Instead of predicting an arbitrary 256-channel feature value, Query predicts low-dimensional flow correction \(\Delta x\), visibility \(m\), and confidence:
+
+\[
+F_t^{transport}(x)=
+m(x)F_{t-1}^{R8}(x+\Delta x)
++(1-m(x))F_{t-1}^{R8}(x).
+\]
+
+A small optional residual reads the transported real feature:
+
+\[
+F_t^{safe}=F_t^{transport}+M_Q\odot\alpha\,
+H\!\left(F_t^{transport},Z_q-Z_0\right),
+\qquad \alpha=\alpha_{max}\tanh(a),\ a_0=0.
+\]
+
+This reduces the learned output from 256 values per pixel to roughly 3–4 motion/visibility values. R8 supplies content; Query supplies where that content should move.
+
+这是 Feature 层最重要的创新：不让稀疏 Query 生成它无法辨识的高维纹理，而只预测“真实 R8 Feature 应该从哪里搬到哪里”。
+
+### 7.4 Sanitized-Query local historical retrieval / 无污染 Query 的局部历史检索
+
+The order is non-negotiable:
+
+\[
+Q_t^{base}=D_{OPUS}(F_t^{safe}).
+\]
+
+Current Query is the attention query; aligned Memory Query controls coordinates; locally sampled historical dense FPN provides key/value:
+
+\[
+e_{ij}=
+\frac{(W_qQ_{t,i}^{base})^\top(W_kK_{t-1,j})}{\sqrt d}
+-\frac{\|X_{t,i}-\tilde X_{t-1,j}\|^2}{2\sigma^2},
+\]
+
+\[
+Q_{t,i}^{out}=Q_{t,i}^{base}
++W_o\sum_{j\in\mathcal N(i)}
+\operatorname{softmax}_j(e_{ij})W_vV_{t-1,j},
+\qquad W_{o,0}=0.
+\]
+
+The neighborhood \(\mathcal N(i)\) is small and multi-level. Attention solves correspondence near the current 3D reference point; it must not replay the full historical FPN already consumed by R8.
+
+固定顺序防止 degraded Query 污染：先得到 safe FPN，再生成 current Query。Current Query 表示当前 Occupancy 需要什么；Memory Query 只决定对齐坐标；历史 Dense FPN 只提供局部真实 K/V。
+
+### 7.5 Task-aligned supervision / 任务对齐监督
+
+Ordinary Feature L1 weights Occupancy-insensitive and Occupancy-sensitive directions equally. A first-order task-aware objective is:
+
+\[
+\mathcal L_J=
+\left\|J_H(F^{clean})(F^{safe}-F^{clean})\right\|_2^2.
+\]
+
+The practical approximation is clean-teacher logit distillation:
+
+\[
+\mathcal L_{KD}=T^2\operatorname{KL}\!\left(
+\operatorname{softmax}(z^{clean}/T)
+\;\|\;
+\operatorname{softmax}(z^{student}/T)
+\right).
+\]
+
+If Feature-space correction remains misaligned, move the residual to Query or Occupancy-logit space:
+
+\[
+z^{out}=z^{R8}+\beta\Delta z(Q_t^{out}),\qquad
+\Delta z^{target}=z^{clean}-z^{R8},\qquad \beta_0=0.
+\]
+
+Decoder Query State distillation must use Query identity or Hungarian matching to avoid supervising mismatched Query order.
+
+### 7.6 Level-wise optimization and no-regret constraints / 分层优化与 no-regret 约束
+
+Because task/feature gradient ratios range from below \(1\times\) to above \(75\times\), a fixed loss weight cannot balance all levels:
+
+| FPN level | E1 cosine | E1 task/feature norm | E3 cosine | E3 task/feature norm |
+|---:|---:|---:|---:|---:|
+| 0 | `-0.4211` | `2.29×` | `-0.1533` | `0.78×` |
+| 1 | `-0.3777` | `4.24×` | `-0.1111` | `2.72×` |
+| 2 | `-0.4125` | `30.82×` | `-0.0845` | `18.35×` |
+| 3 | `-0.6189` | `75.79×` | `-0.4092` | `72.10×` |
+
+The conflict is amplified by coarse levels 2/3, especially level 3. This explains why a single global Feature-loss weight is structurally inadequate.
+
+冲突主要由 coarse FPN level 2/3 放大，尤其 level 3；因此单一全局 Feature Loss 权重无法同时平衡四个层级。
+
+\[
+g_{task,l}^{safe}=g_{task,l}-
+\frac{\min(0,g_{task,l}^{\top}g_{feat,l})}
+{\|g_{feat,l}\|^2}g_{feat,l}.
+\]
+
+A stricter formulation is constrained optimization:
+
+\[
+\min_\theta \mathcal L_{task}(\theta)
+\quad\text{s.t.}\quad
+\mathcal L_{feat}(F^{safe},F^{clean})
+\le\mathcal L_{feat}(F^{base},F^{clean}),
+\quad \|\Delta\|\le\epsilon.
+\]
+
+Recommended schedule / 建议训练顺序：
+
+```text
+Phase A: freeze projector + trunk; train the zero-init head
+Phase B: if validated, unfreeze only decoder block 2
+Phase C: only after independent-window success, use a small-LR joint tune
+Every phase: zero-Query, support-exterior, healthy-camera, clean-scene, and R8-parity tests
+```
+
+## 8. Innovation summary / 创新点总结
+
+1. **Two-level error decomposition:** Feature layer removes observation corruption; Query layer retrieves task-relevant temporal evidence. / **两级误差分解：** Feature 层清除观测污染，Query 层检索任务相关时序证据。
+2. **Information-matched roles:** R8 carries appearance, Memory Query carries motion, current Query carries task demand, and logits carry final correction. / **信息能力匹配：** R8 承载内容，Memory Query 承载运动，current Query 承载任务需求，logits 承载最终修正。
+3. **Structural no-regret initialization:** zero flow/head/attention/logit scale reproduces R8 exactly. / **结构性 no-regret 初始化：** 零 flow、零 head、零 attention 输出与零 logit 缩放严格复现 R8。
+4. **No duplicate temporal injection:** R8 provides full historical content once; attention samples only local multi-level evidence. / **避免重复注入：** R8 只完整提供一次历史内容，Attention 仅获取局部多层证据。
+5. **Task-aligned fallback:** when dense-feature reconstruction is underdetermined, correction moves progressively to Decoder Query or Occupancy logits. / **任务对齐退路：** Dense Feature 重建不可辨识时，修正位置递进转向 Decoder Query 或 Occupancy logits。
+
+## 9. Experimental ladder / 实验阶梯
+
+```mermaid
+flowchart TB
+    E0["E0: R8<br/>supported baseline"] --> E1F["E1-Fix<br/>shared augmentation source contract"]
+    E1F --> E1C["E1-Centered<br/>counterfactual zero-Query subtraction"]
+    E1C --> E1L["E1-Local<br/>hard local support"]
+    E1L --> E1T["E1-Transport<br/>flow + visibility"]
+    E1T --> E1R["E1-Transport-Residual<br/>bounded local correction"]
+    E0 --> E2["E2: R8 + local historical retrieval attention"]
+    E1R --> E3["E3: Feature correction + Query retrieval"]
+    E2 --> E3
+    E3 --> E4["E4: clean Occupancy-logit / decoder-state distillation"]
+    E4 --> E5["E5: Query or Occupancy-logit residual"]
+
+    E0 -. "must remain exact fallback" .-> E1F
+    E0 -. "must remain exact fallback" .-> E2
+```
+
+Do not run only E3: E1 and E2 must be independently validated to identify complementarity, repeated correction, or mutual interference.
+
+不能只跑 E3。必须先独立验证 E1 和 E2，才能识别两层是否互补、重复修正或相互干扰。
+
+The execution order is:
+
+1. Extend the current residual training to 10 epochs and evaluate the Feature-only checkpoint separately.
+2. If residual-target cosine remains near zero, stop Dense Feature Value Residual.
+3. Preserve the already meaningful Query-guided transport and change its learned output to flow + visibility.
+4. Train with clean Occupancy-logit distillation rather than treating ordinary Feature L1 as the primary objective.
+5. If Feature/Task misalignment remains, move the learnable correction to Decoder Query or Occupancy-logit residual.
+
+对应执行顺序是：先扩展训练并单独评估 Feature-only checkpoint；若 residual-target cosine 仍接近零，则停止 Dense Feature Value Residual；保留具有物理意义的 Transport，将预测对象改为 flow + visibility；再使用 clean Occupancy logit 蒸馏；若仍不对齐，则转向 Decoder Query 或 Occupancy Logit Residual。
+
+The highest-probability final composition is:
+
+```text
+R8 real Dense Feature
+→ Query-predicted flow / visibility
+→ geometric local transport
+→ frozen Occupancy Head
+→ Query-predicted Occupancy-logit residual
+→ clean Occupancy teacher distillation
+```
+
+Its role separation is explicit: **R8 supplies content, Query supplies motion, and logit residual supplies final task correction.**
+
+## 10. Claim boundary / 结论边界
 
 This audit documents an active, uncommitted research workspace. It does not claim an official nuScenes benchmark improvement, a production-ready replacement for R8, or completion of the Robot's current experiment. Numbers are internal frozen-window diagnostics and may be superseded by later work.
 
