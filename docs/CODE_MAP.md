@@ -2,6 +2,8 @@
 
 The repository contains more than 56,000 lines of project experiment code. This map is the recommended reading order; stage numbers reflect the real research sequence rather than a reconstructed portfolio narrative.
 
+The active Robot workspace is documented through a [read-only MCQM × R8 audit](ROBOT_READONLY_AUDIT.md). Its uncommitted source is deliberately not included in this branch.
+
 ## Fast reviewer path
 
 | Goal | Source directory | What to inspect |

@@ -1,5 +1,7 @@
 # SparseWorld Reliability Lab
 
+**English** | [简体中文](README_zh-CN.md)
+
 **A system-algorithm project for robust 4D occupancy under real sensor degradation.**
 
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](#quick-start)
@@ -86,6 +88,31 @@ flowchart LR
 ![Template 1 future rollout](assets/template1/template1_future_rollout.gif)
 
 </details>
+
+## Read-only research snapshot: MCQM × R8
+
+The active Robot workspace was inspected **read-only** on 2026-07-14. Its source code is intentionally not copied into this portfolio branch. The ongoing line asks whether motion-compensated sparse queries can improve R8 without sacrificing its causal, camera-selective safety contract.
+
+```mermaid
+flowchart LR
+    A["t-1 query memory"] --> B["ego-motion compensation"]
+    B --> C["camera projection + confidence-weighted splat"]
+    C --> D["four-level FPN reconstruction / local residual"]
+    E["R8: t-1 same-camera FPN replacement"] --> F["transport + residual candidate"]
+    D --> F
+    F --> G["frozen occupancy head"]
+    G --> H["IoU / false-free / horizon audit"]
+    I["feature loss"] --> J["gradient-alignment audit / PCGrad"]
+    G --> J
+```
+
+The audit found three important engineering conclusions:
+
+1. **The corrected four-FPN contract is valid:** native bypass, healthy-camera passthrough, history passthrough, and zero-initialization parity all pass.
+2. **Feature reconstruction is not equivalent to task improvement:** transport/residual variants reduce feature L1 error, but their Occupancy gains do not generalize across evaluation windows.
+3. **The conflict is measurable:** feature and task gradients have negative mean cosine (`-0.487` for centered/local residual and `-0.256` for transport residual), with a 100% negative fraction in the audited window. Level-wise PCGrad removes opposing components, but the preregistered task thresholds still do not pass.
+
+Therefore, **R8 remains the supported mainline**. Full Q2F, dense residual, transport, retrieval attention, and PCGrad remain research evidence rather than claimed improvements. See the bilingual [MCQM × R8 read-only audit](docs/ROBOT_READONLY_AUDIT.md) for equations, tensor contracts, factorial design, results, and the next solution direction.
 
 ## Experiment atlas: beyond R8
 
