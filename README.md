@@ -1,166 +1,120 @@
-# SparseWorld Reliability Lab
+# SparseWorld 可靠性实验室
 
-**English** | [简体中文](README_zh-CN.md)
+**简体中文** | [English](README_EN.md)
 
-**A system-algorithm project for robust 4D occupancy under real sensor degradation.**
+**面向真实传感器退化的鲁棒 4D Occupancy 系统算法项目。**
 
-[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](#quick-start)
+[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](README_EN.md#quick-start)
 [![Core tests](https://github.com/Rexlion777/SparseWorld-4D-Occupancy/actions/workflows/core-tests.yml/badge.svg)](https://github.com/Rexlion777/SparseWorld-4D-Occupancy/actions/workflows/core-tests.yml)
-[![Task](https://img.shields.io/badge/Task-4D%20Occupancy-7B61FF)](#system-at-a-glance)
-[![Dataset](https://img.shields.io/badge/Dataset-nuScenes-00A6D6)](#evaluation-protocol)
-[![Safety](https://img.shields.io/badge/Protocol-Causal%20%7C%20No%20GT%20Repair-1F9D55)](#causal-and-safety-contract)
+[![Task](https://img.shields.io/badge/Task-4D%20Occupancy-7B61FF)](README_EN.md#system-at-a-glance)
+[![Dataset](https://img.shields.io/badge/Dataset-nuScenes-00A6D6)](README_EN.md#evaluation-protocol)
 
-> The project turns a research-grade SparseWorld model into an auditable perception system: it injects camera faults, traces failure propagation, restores missing camera features from causal temporal memory, and measures both recovery and false-occupancy risk.
+> 项目将研究型 SparseWorld 模型扩展为可审计感知系统：注入相机故障，追踪故障传播，使用因果时序记忆修复缺失相机特征，并同时评估恢复收益与虚假占据风险。
 
 ![R8 degradation recovery summary](assets/r8_result_card.svg)
 
-## Headline result: R8 camera-group memory repair
+## R8 核心结果
 
-R8 caches the last valid same-camera FPN features and replaces only the failed front-camera group before the occupancy head. On the frozen degradation evaluation suite, it achieved:
+R8 缓存上一个有效时刻的同相机 FPN 特征，仅替换当前失效的前向相机组。在冻结的退化评测协议下：
 
-| Sensor degradation | Reliability result vs. degraded baseline |
+| 传感器退化 | 相对退化基线的结果 |
 |---|---:|
-| Front triplet missing | **23.2% relative FN reduction** |
-| Front triplet missing, 4 s future horizon | **10.5% relative FN reduction** |
-| Single front camera missing | **17.4% relative FN reduction** |
-| Motion blur | **7.1% relative FN reduction** |
-| Occupancy-density expansion | **controlled to +2.3% to +6.0%** |
+| 前向三相机缺失 | **FN 相对降低 23.2%** |
+| 前向三相机缺失，4 s 未来时域 | **FN 相对降低 10.5%** |
+| 单前向相机缺失 | **FN 相对降低 17.4%** |
+| 运动模糊 | **FN 相对降低 7.1%** |
+| 占据密度扩张 | **控制在 +2.3% 至 +6.0%** |
 
-These are fault-recovery results, not nuScenes leaderboard claims. Metric definitions, causal constraints, and the frozen comparison protocol are documented in [RESULTS.md](docs/RESULTS.md).
-
-### R8 visual evidence
-
-The qualitative panels use the same frozen predictions as the metric audit. Red regions expose false-free errors; the repaired column shows what causal same-camera memory restores without reading the current clean frame or ground truth.
+这些是故障恢复结果，不是 nuScenes 榜单结果。
 
 ![R8 BEV repair comparison](assets/r8/r8_bev_repair_comparison.png)
 
-<details>
-<summary><strong>Expanded 100-sample front-cap diagnostic</strong></summary>
+## 系统概览
 
-![R8 front-cap diagnostic](assets/r8/r8_frontcap_core100_diagnostic.png)
+- 每个样本 **30 张图像**：5 个时序帧 × 6 个环视相机。
+- **1,040 个 Query** 表示 200 × 200 × 16，即 **640,000 个体素**。
+- 输出 0 s、2 s、4 s、6 s 的语义占据。
+- 故障集覆盖相机缺失、前向三相机缺失、后向相机缺失、运动模糊和低照度。
+- 评测包含分区域、分类别、分时域 FN/FP，Occupancy 密度、时序稳定性与延迟。
 
-![R8 recovery-density trade-off](assets/r8/sw13a_recovery_density_tradeoff.png)
+## Template 1 四种可视化
 
-</details>
-
-## System at a glance
-
-- **30 images per sample:** 5 temporal frames × 6 surround cameras.
-- **Sparse-to-dense reasoning:** 1,040 queries represent a 200 × 200 × 16 occupancy volume (**640,000 voxels**).
-- **4D output:** semantic occupancy at 0 s, 2 s, 4 s, and 6 s.
-- **Reliability suite:** camera loss, front-triplet loss, rear-camera loss, motion blur, and low-light perturbations.
-- **System diagnostics:** sector-, class-, and horizon-level FN/FP, occupancy density, temporal stability, and latency.
-
-```mermaid
-flowchart LR
-    A["5 frames × 6 cameras"] --> B["Image backbone + FPN"]
-    B --> C["Sparse queries"]
-    C --> D["4D occupancy head"]
-    D --> E["0 / 2 / 4 / 6 s occupancy"]
-    F["Sensor fault injector"] -. "camera loss / blur / low light" .-> A
-    G["Causal same-camera memory"] --> H["R8 selective feature repair"]
-    B --> H
-    H --> D
-    E --> I["FN / FP / density / stability audit"]
-```
-
-## What I built
-
-1. **End-to-end evaluation path** — nuScenes temporal data organization, calibration loading, SparseWorld inference/fine-tuning, semantic occupancy metrics, and BEV visualization.
-2. **Sensor degradation engine** — deterministic perturbations with manifests that preserve camera, frame, and severity provenance.
-3. **Causal feature memory** — same-camera historical FPN cache, selective repair masks, and zero-oracle runtime behavior.
-4. **Failure attribution** — region-, class-, and future-horizon analysis instead of a single aggregate score.
-5. **Engineering decision loop** — preregistered thresholds, parity checks, ablations, and explicit rejection of variants that improve feature reconstruction but not occupancy quality.
-
-## Template 1: four complementary 4D views
-
-“Template 1” is the project-specific visualization family used to inspect the same prediction from four angles. These figures are qualitative diagnostics, not manually edited predictions or leaderboard evidence.
-
-| 1. Surround observation + future occupancy | 2. Strict BEV projection |
+| 环视观测 + 未来 Occupancy | Strict BEV |
 |---|---|
 | ![Template 1 overview](assets/template1/01_observation_future_overview.png) | ![Template 1 strict BEV](assets/template1/02_strict_bev.png) |
-| **3. Front/ego-centric view** | **4. GT vs. SparseWorld temporal rollout** |
+| **前视/自车视角** | **GT 与 SparseWorld 时序对比** |
 | ![Template 1 front view](assets/template1/03_front_view.png) | ![Template 1 GT versus prediction](assets/template1/04_gt_vs_prediction_rollout.png) |
 
-<details>
-<summary><strong>Animated future rollout</strong></summary>
+## Robot 当前工作的只读审计
 
-![Template 1 future rollout](assets/template1/template1_future_rollout.gif)
+2026-07-14 对 Robot 工作区进行了只读审计，未复制和提交其源码。当前方法主线为：
 
-</details>
-
-## Read-only research snapshot: MCQM × R8
-
-The active Robot workspace was inspected **read-only** on 2026-07-14. Its source code is intentionally not copied into this portfolio branch. The ongoing line asks whether motion-compensated sparse queries can improve R8 without sacrificing its causal, camera-selective safety contract.
-
-```mermaid
-flowchart LR
-    A["t-1 query memory"] --> B["ego-motion compensation"]
-    B --> C["camera projection + confidence-weighted splat"]
-    C --> D["four-level FPN reconstruction / local residual"]
-    E["R8: t-1 same-camera FPN replacement"] --> F["transport + residual candidate"]
-    D --> F
-    F --> G["frozen occupancy head"]
-    G --> H["IoU / false-free / horizon audit"]
-    I["feature loss"] --> J["gradient-alignment audit / PCGrad"]
-    G --> J
+```text
+历史 Query 记忆
+→ 自车运动补偿
+→ 相机投影与置信度加权 splat
+→ 四层 FPN 重建/局部残差/时序传输或检索
+→ R8 故障相机特征
+→ 冻结 Occupancy Head
+→ 特征与任务梯度对齐审计
 ```
 
-The audit found three important engineering conclusions:
+审计结论：
 
-1. **The corrected four-FPN contract is valid:** native bypass, healthy-camera passthrough, history passthrough, and zero-initialization parity all pass.
-2. **Feature reconstruction is not equivalent to task improvement:** transport/residual variants reduce feature L1 error, but their Occupancy gains do not generalize across evaluation windows.
-3. **The conflict is measurable:** feature and task gradients have negative mean cosine (`-0.487` for centered/local residual and `-0.256` for transport residual), with a 100% negative fraction in the audited window. Level-wise PCGrad removes opposing components, but the preregistered task thresholds still do not pass.
+1. 四层 FPN 重建契约、健康相机原样透传和零初始化一致性均已验证。
+2. 特征重建误差降低，但 Occupancy 任务收益未能在独立窗口稳定泛化。
+3. 特征损失与任务损失的平均梯度余弦为 `-0.487` 和 `-0.256`，审计窗口中负梯度比例均为 100%。
+4. PCGrad 能去除直接对立分量，但仍未通过预注册的泛化和 false-free 门槛。
 
-Therefore, **R8 remains the supported mainline**. Full Q2F, dense residual, transport, retrieval attention, and PCGrad remain research evidence rather than claimed improvements. See the bilingual [MCQM × R8 read-only audit](docs/ROBOT_READONLY_AUDIT.md) for equations, tensor contracts, factorial design, results, and the next solution direction.
+因此，**R8 仍是当前有证据支持的主线**。Q2F、残差、传输、检索和 PCGrad 作为研究证据保留，不冒充成功提升。完整公式、因子设计和结果见 [MCQM × R8 双语只读审计](docs/ROBOT_READONLY_AUDIT.md)。
 
-### Proposed next-generation chain: feature firewall → task-aligned retrieval
+### 下一代递进架构：Feature 防火墙 → 任务对齐检索
 
-The following is a **progressive candidate architecture**, not a claimed result. It preserves the original R8 path while assigning each information source only the role it can reliably perform.
+下图是**递进式候选架构**，不是已证实的提升结果。它保留原有 R8 主线，并严格限定每种信息源的职责。
 
 ```mermaid
 flowchart TB
-    subgraph C0["0. Coordinate contract"]
-        CT["Current clean temporal bundle"] --> CF["Current teacher slot: t"]
-        CT --> HF["Shared-augmentation history slot: t-1"]
-        IDA["Assert identical resize / crop / flip"] --> HF
+    subgraph C0["0. 坐标合同"]
+        CT["当前 clean temporal bundle"] --> CF["当前 teacher slot: t"]
+        CT --> HF["共享增强的历史 slot: t-1"]
+        IDA["强断言 resize / crop / flip 一致"] --> HF
         IDA --> CF
     end
 
-    subgraph C1["1. Feature firewall"]
-        DI["Current degraded images"] --> NF["Backbone + four-level native FPN"]
-        HF --> R8["R8 same-camera replacement"]
+    subgraph C1["1. Feature 层故障防火墙"]
+        DI["当前故障图像"] --> NF["Backbone + 四层 native FPN"]
+        HF --> R8["R8 同相机特征替换"]
         NF --> R8
-        MQ["Memory Query: geometry + motion only"] --> FLOW["Motion-compensated local flow / visibility"]
-        R8 --> TRANS["Query-guided transport of real R8 values"]
+        MQ["Memory Query：仅负责几何和运动"] --> FLOW["运动补偿的局部 flow / visibility"]
+        R8 --> TRANS["Query 引导的真实 R8 Feature 搬运"]
         FLOW --> TRANS
-        TRANS --> CEN["Counterfactual-centered local residual<br/>T(query)-T(zero)"]
-        CEN --> SAFE["Fault-sanitized FPN"]
+        TRANS --> CEN["反事实中心化局部残差<br/>T(query)-T(zero)"]
+        CEN --> SAFE["fault-sanitized FPN"]
     end
 
-    subgraph C2["2. Query-level temporal retrieval"]
+    subgraph C2["2. Query 层时序检索"]
         SAFE --> OPUS["OPUS Decoder"]
-        OPUS --> QB["Fault-sanitized current Query"]
-        MQ --> COORD["Aligned reference points / sampling coordinates"]
-        HF --> KV["Small multi-level historical evidence as K/V"]
+        OPUS --> QB["无故障污染的 current Query"]
+        MQ --> COORD["对齐后的 reference point / 采样坐标"]
+        HF --> KV["局部多层历史证据 K/V"]
         COORD --> KV
-        QB --> ATTN["Local historical Dense Feature Retrieval Attention"]
+        QB --> ATTN["局部历史 Dense Feature Retrieval Attention"]
         KV --> ATTN
-        ATTN --> QOUT["Current Query + zero-init retrieval delta"]
+        ATTN --> QOUT["current Query + 零初始化检索增量"]
     end
 
-    subgraph C3["3. Task-aligned correction"]
-        QOUT --> HEAD["Frozen Occupancy Head"]
+    subgraph C3["3. 任务对齐纠错"]
+        QOUT --> HEAD["冻结 Occupancy Head"]
         HEAD --> ZB["R8-safe Occupancy logits"]
-        QOUT --> LR["Bounded Query / logit residual"]
-        ZB --> ZOUT["Task-aligned output logits"]
+        QOUT --> LR["有幅度上界的 Query / Logit residual"]
+        ZB --> ZOUT["任务对齐输出 logits"]
         LR --> ZOUT
         ZOUT --> OCC["0 / 2 / 4 / 6 s Occupancy"]
-        CF -. "training-only clean teacher" .-> DISTILL["Logit / decoder-state distillation"]
+        CF -. "仅训练时 clean teacher" .-> DISTILL["Logit / Decoder State 蒸馏"]
         DISTILL -.-> ZOUT
     end
 
-    R8 -. "supported baseline" .-> SAFE
+    R8 -. "已支持基线" .-> SAFE
     classDef supported fill:#d8f3dc,stroke:#2d6a4f,stroke-width:2px,color:#081c15;
     classDef validating fill:#fff3bf,stroke:#e67700,stroke-width:2px,color:#5f3b00;
     classDef proposed fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#172554;
@@ -171,83 +125,53 @@ flowchart TB
     class CF,CT,IDA trainonly;
 ```
 
-The structural contracts are:
+核心结构约束：
 
-\[
+$$
 F_t^{safe}=F_t^{transport}+M_Q\odot\alpha\,H\!\left(F_t^{transport},T(S(Q))-T(S(0))\right),
 \quad \alpha=\alpha_{max}\tanh(a),\ a_0=0,
-\]
+$$
 
-\[
+$$
 Q_t^{out}=Q_t^{base}+W_o\operatorname{Attn}\!\left(Q_t^{base},K(F_{t-1}^{clean}),V(F_{t-1}^{clean})\right),
 \quad W_{o,0}=0,
-\]
+$$
 
-\[
+$$
 z_t^{out}=z_t^{R8}+\beta\,\Delta z(Q_t^{out}),\quad \beta_0=0.
-\]
+$$
 
-This creates five no-regret checks at initialization: exact R8 parity, zero Query ⇒ zero residual, support exterior ⇒ zero modification, healthy cameras unchanged, and retrieval disabled ⇒ the Feature route unchanged.
+这些结构在初始化时建立五个 no-regret 合同：严格复现 R8；Query 清零时残差为零；support 外修改为零；健康相机原样保留；关闭检索时严格退化为 Feature 路线。
 
-**Innovation focus:** R8 carries real visual content; Memory Query predicts geometry and motion; current Query requests only local historical evidence; the logit residual corrects the final task. This avoids asking a sparse Query to synthesize an arbitrary 256-channel dense feature map and prevents duplicate replay of the full `t-1` FPN.
+**创新点：** R8 负责真实视觉内容，Memory Query 负责几何与运动，current Query 仅请求局部历史证据，Logit Residual 负责最终任务修正。这避免让稀疏 Query 凭空生成 256 通道 Dense Feature，也防止 Attention 重复回放整张 `t-1` FPN。
 
-## Experiment atlas: beyond R8
+## 项目代码与实验量
 
-R8 is the strongest headline result, but the project is a broader systems investigation rather than a single trick. The full research sequence includes:
+仓库保留 31 个有技术递进关系的实验阶段，约 5.6 万行 Python 代码，包含：
 
-| Track | Question | Outcome |
-|---|---|---|
-| Bring-up & geometry audit | Are temporal ordering, calibration, query semantics, and occupancy labels correct? | **Infrastructure established** |
-| Sensor-fault propagation | Where do camera loss, blur, and low light first damage the 4D prediction chain? | **Failure taxonomy established** |
-| Reliability maps | Can risk be localized by camera sector, class, distance, and future horizon? | **Diagnostic tool established** |
-| Targeted fine-tuning | Does direct retraining recover fault robustness without clean-scene regression? | **Mixed; scale- and protocol-sensitive** |
-| Contributor routing | Which sparse queries and support voxels actually affect failed regions? | **Useful causal evidence; limited repair gain** |
-| R8 feature memory | Can causal same-camera history repair missing front views? | **Strongest supported recovery** |
-| Learned gates / residuals | Can a small learned adapter improve on R8? | **Feature error improved; occupancy gain not stable** |
-| MCQM / Query-to-FPN | Can motion-compensated sparse query memory reconstruct dense FPN features? | **Mechanism validated; task contribution often harmful** |
-| Gradient alignment / PCGrad | Is objective conflict blocking the residual path? | **Conflict exposed; no stable replacement for R8 yet** |
-| Visualization | Can 4D occupancy and support evolution be audited frame by frame? | **BEV / first-person / temporal assets produced** |
+- SW1–SW4：模型 bring-up、几何、Query support 与语义激活。
+- SW5–SW7：传感器故障注入、传播诊断与可靠性图。
+- SW8–SW12：定向微调、贡献者路由与安全修复。
+- SW13：因果特征记忆、密度约束与 R8 规模验证。
+- SW14：可学习门控、残差、重排与负结果审计。
+- MCQM/SWVIS：运动补偿 Query 记忆和 Template 1/4D 可视化。
 
-The detailed [EXPERIMENTS.md](docs/EXPERIMENTS.md) records hypotheses, evidence, and stop/continue decisions—including negative results—without pretending every experiment was a win.
+建议从 [源码地图](docs/CODE_MAP.md) 开始阅读。
 
-## Causal and safety contract
-
-The public core module makes the main invariants executable:
-
-- only `t-1` or older features may be used;
-- current clean images are never used to repair a degraded frame;
-- ground truth is never used in repair or routing;
-- only declared failed cameras may be overwritten;
-- non-target cameras remain bitwise unchanged;
-- clean input is a no-op.
-
-See [`src/sparseworld_reliability/feature_memory.py`](src/sparseworld_reliability/feature_memory.py) and its focused tests.
-
-## Repository map
+## 仓库结构
 
 ```text
 SparseWorld-4D-Occupancy/
-├── src/sparseworld_reliability/  # clean, dependency-light reliability core
-├── tests/                        # causal, shape, and metric contracts
+├── src/sparseworld_reliability/   # 轻量可测试可靠性核心
+├── tests/                         # 因果、形状与指标契约
 ├── scripts/lidar_system_algorithm/
-│   └── sparseworld_mainline/      # 30+ real experiment stages, 56k+ lines
-├── docs/
-│   ├── ARCHITECTURE.md           # model and data flow
-│   ├── EXPERIMENTS.md            # complete hypothesis/evidence/decision map
-│   ├── RESULTS.md                # R8 protocol and result interpretation
-│   ├── REPRODUCIBILITY.md        # environment and full-pipeline guidance
-│   └── CODE_MAP.md               # source-level reading guide
-├── assets/                       # Template 1 and R8 evidence gallery
-└── external/SparseWorld          # upstream research code as a submodule
+│   └── sparseworld_mainline/       # 31 个真实实验阶段
+├── docs/                          # 架构、实验、结果、可复现性与只读审计
+├── assets/                        # Template 1 与 R8 证据画廊
+└── external/SparseWorld           # 上游子模块
 ```
 
-The source tree deliberately keeps substantial experiment code rather than only presenting a polished toy module. It covers model bring-up, geometry and query-support audits, sensor-fault propagation, targeted fine-tuning, contributor routing, R8 causal feature memory, density-constrained repair, learned residual/gating attempts, MCQM query memory, and visualization generation. Repeated caches, checkpoints, generated test output, and active unfinished Robot work are excluded.
-
-Start with [CODE_MAP.md](docs/CODE_MAP.md): it separates the supported path from negative-result branches and explains which files are worth reading first.
-
-## Quick start
-
-The reliability core is intentionally independent of MMCV/MMDetection3D:
+## 快速测试
 
 ```bash
 git clone --recurse-submodules https://github.com/Rexlion777/SparseWorld-4D-Occupancy.git
@@ -258,12 +182,8 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-Running the complete nuScenes/SparseWorld pipeline additionally requires the upstream CUDA/MMCV environment, dataset, and checkpoint. See [REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md).
+完整 nuScenes/SparseWorld 链路额外需要 CUDA/MMCV 环境、数据集和 checkpoint，详见 [REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md)。
 
-## Evaluation protocol
+## 上游归属
 
-The R8 numbers use the same model checkpoint, sample set, perturbation definitions, post-processing, and metric implementation for native degraded and repaired inference. Hyper-parameter selection and final evaluation are separated; failed variants remain failed rather than being relabeled as improvements.
-
-## Upstream attribution
-
-This project extends [MSunDYY/SparseWorld](https://github.com/MSunDYY/SparseWorld), which is included as a Git submodule. The reliability pipeline, perturbation analysis, causal feature-memory repair, evaluation contracts, and result interpretation in this repository are project-specific additions. Please follow the upstream repository's license and dataset terms.
+本项目扩展自 [MSunDYY/SparseWorld](https://github.com/MSunDYY/SparseWorld)。传感器退化、因果特征记忆、评测契约、可靠性诊断与结果解读是本项目的扩展工作。

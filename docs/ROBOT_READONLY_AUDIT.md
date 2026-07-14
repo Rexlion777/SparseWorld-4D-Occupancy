@@ -46,94 +46,94 @@ t-1 六相机图像
 
 ### 3.1 Ego-motion compensation / 自车运动补偿
 
-For a historical query point \(p_{t-1}\):
+For a historical query point $p_{t-1}$:
 
-\[
+$$
 p_t = T_{E_t\leftarrow G}\,T_{G\leftarrow E_{t-1}}\,p_{t-1}
     = T_{G\leftarrow E_t}^{-1}T_{G\leftarrow E_{t-1}}p_{t-1}.
-\]
+$$
 
 这一步把历史 Query 的空间位置对齐到当前自车坐标系，避免把自车运动误认为环境运动。
 
 ### 3.2 Camera projection / 相机投影
 
-\[
+$$
 \tilde p_{i,c}=K_cT_{C_c\leftarrow E_t}p_{t,i},\qquad
 u_{i,c}=\tilde x/\tilde z,\quad v_{i,c}=\tilde y/\tilde z.
-\]
+$$
 
 Only positive-depth, in-frame points enter the valid support mask. / 仅深度为正且落在图像内的点可以进入 support mask。
 
 ### 3.3 Confidence-weighted query-to-FPN splat / Query 到 FPN 的加权散射
 
-For FPN level \(l\), query feature \(q_i\), confidence \(a_i\), and bilinear kernel \(k\):
+For FPN level $l$, query feature $q_i$, confidence $a_i$, and bilinear kernel $k$:
 
-\[
+$$
 S_l(x)=
 \frac{\sum_i a_i^{\gamma}k(x,\pi(p_{t,i}))W_lq_i}
 {\sum_i a_i^{\gamma}k(x,\pi(p_{t,i}))+\epsilon}.
-\]
+$$
 
 The sparse field and its support/weight maps are then decoded into a dense FPN candidate. / 稀疏特征与 support/weight map 共同进入 decoder，生成稠密 FPN 候选。
 
 ### 3.4 R8 baseline / R8 基线
 
-\[
+$$
 F^{R8}_{t,l,c}=
 \begin{cases}
 F_{t,l,c}, & c\notin\mathcal F_t,\\
 F_{t-1,l,c}, & c\in\mathcal F_t,
 \end{cases}
-\]
+$$
 
-where \(\mathcal F_t\) is the declared failed-camera set. Healthy cameras remain bitwise unchanged. / \(\mathcal F_t\) 为当前明确声明的故障相机集合，健康相机保持 bitwise unchanged。
+where $\mathcal F_t$ is the declared failed-camera set. Healthy cameras remain bitwise unchanged. / $\mathcal F_t$ 为当前明确声明的故障相机集合，健康相机保持 bitwise unchanged。
 
 ### 3.5 Full Q2F and R8 residual / 完整 Q2F 与 R8 残差
 
 Full reconstruction:
 
-\[
+$$
 \hat F_{t,l,c}=D_l\!\left(S_l(P_l(Q^{comp}_{t-1}))\right),
 \qquad c\in\mathcal F_t.
-\]
+$$
 
 R8-conditioned residual:
 
-\[
+$$
 \Delta F_{t,l,c}=D_l(S_l;F^{R8}_{t,l,c}),\qquad
 F^{rec}_{t,l,c}=F^{R8}_{t,l,c}+M_{l,c}\odot\Delta F_{t,l,c}.
-\]
+$$
 
-The zero-initialized output head enforces \(\Delta F=0\) before training, so the new path starts exactly at R8 parity. / 输出头零初始化，保证训练前 \(\Delta F=0\)，新路径从与 R8 完全一致的起点开始。
+The zero-initialized output head enforces $\Delta F=0$ before training, so the new path starts exactly at R8 parity. / 输出头零初始化，保证训练前 $\Delta F=0$，新路径从与 R8 完全一致的起点开始。
 
 ### 3.6 Distillation and task objectives / 特征蒸馏与任务目标
 
-\[
+$$
 \mathcal L_{feat}=\operatorname{SmoothL1}(F^{rec},F^{clean})
 +\lambda_{cos}\left(1-\cos(F^{rec},F^{clean})\right),
 \quad \lambda_{cos}=0.1.
-\]
+$$
 
-\[
+$$
 \mathcal L=\mathcal L_{feat}+\mathcal L_{occ},
-\]
+$$
 
-where \(\mathcal L_{occ}\) is the frozen SparseWorld Occupancy task loss propagated into the added branch. / \(\mathcal L_{occ}\) 是经过冻结 SparseWorld Occupancy Head 回传到新增分支的任务损失。
+where $\mathcal L_{occ}$ is the frozen SparseWorld Occupancy task loss propagated into the added branch. / $\mathcal L_{occ}$ 是经过冻结 SparseWorld Occupancy Head 回传到新增分支的任务损失。
 
 ### 3.7 Gradient diagnosis and PCGrad / 梯度冲突诊断与 PCGrad
 
-\[
+$$
 \rho=\frac{g_{feat}^{\top}g_{task}}
 {\|g_{feat}\|\,\|g_{task}\|}.
-\]
+$$
 
-If \(g_{feat}^{\top}g_{task}<0\), the implementation projects the task gradient away from the opposing feature component:
+If $g_{feat}^{\top}g_{task}<0$, the implementation projects the task gradient away from the opposing feature component:
 
-\[
+$$
 g'_{task}=g_{task}-
 \frac{g_{task}^{\top}g_{feat}}{\|g_{feat}\|^2}g_{feat},
 \qquad g=g_{feat}+\operatorname{Rescale}(g'_{task}).
-\]
+$$
 
 若两个目标的梯度点积为负，则投影掉任务梯度中与特征梯度相反的分量，再合并更新。
 
@@ -225,13 +225,13 @@ flowchart LR
 
 Training must source dense R8 features from the history slot inside the current clean temporal bundle:
 
-\[
+$$
 \mathcal B_t^{clean}=[I_t^{clean},I_{t-1}^{clean},\ldots],\qquad
 F_t^{teacher}=E(I_t^{clean};A),\quad
 F_{t-1}^{R8}=E(I_{t-1}^{clean};A),
-\]
+$$
 
-where the same augmentation \(A\) is shared by both slots. Memory Query may still come from an independently loaded sample because its reference points are transformed in 3D/world coordinates; dense R8 must not.
+where the same augmentation $A$ is shared by both slots. Memory Query may still come from an independently loaded sample because its reference points are transformed in 3D/world coordinates; dense R8 must not.
 
 训练时 Dense R8 必须从当前 clean temporal bundle 的 history slot 中提取，使 current teacher 与 R8 source 共享同一组 IDA 变换。Memory Query 因已进入三维/世界坐标，可以来自独立 previous sample；Dense Feature 不可以。
 
@@ -247,19 +247,19 @@ evaluation has no clean bundle and uses deterministic preprocessing
 
 ### 7.2 Counterfactual-centered local residual / 反事实中心化局部残差
 
-\[
+$$
 Z_q=T(S(Q),M,W),\qquad Z_0=T(0,M,W),\qquad
 \Delta F=H(Z_q-Z_0).
-\]
+$$
 
 This removes Query-independent output caused by support, confidence, convolution bias, or normalization. The residual is then constrained spatially:
 
-\[
+$$
 \Delta F_l(x)=M_l(x)\odot
 \frac{\sum_q w_q(x)\Delta F_{q,l}(x)}
 {\sum_q w_q(x)+\epsilon},
 \qquad M_l(x)=0\Rightarrow\Delta F_l(x)=0.
-\]
+$$
 
 Support is constructed once in normalized image coordinates at the highest-resolution level and area-pooled to each real lower-level size. The hard contract is:
 
@@ -267,25 +267,25 @@ Support is constructed once in normalized image coordinates at the highest-resol
 outside_support_residual_abs_max == 0
 ```
 
-该设计通过 \(T(Q)-T(0)\) 从结构上消除与 Query 无关的背景输出，再用硬 support 禁止残差扩散到整张 FPN。
+该设计通过 $T(Q)-T(0)$ 从结构上消除与 Query 无关的背景输出，再用硬 support 禁止残差扩散到整张 FPN。
 
 ### 7.3 Query-guided R8 Feature Transport / Query 引导的 R8 特征搬运
 
-Instead of predicting an arbitrary 256-channel feature value, Query predicts low-dimensional flow correction \(\Delta x\), visibility \(m\), and confidence:
+Instead of predicting an arbitrary 256-channel feature value, Query predicts low-dimensional flow correction $\Delta x$, visibility $m$, and confidence:
 
-\[
+$$
 F_t^{transport}(x)=
 m(x)F_{t-1}^{R8}(x+\Delta x)
 +(1-m(x))F_{t-1}^{R8}(x).
-\]
+$$
 
 A small optional residual reads the transported real feature:
 
-\[
+$$
 F_t^{safe}=F_t^{transport}+M_Q\odot\alpha\,
 H\!\left(F_t^{transport},Z_q-Z_0\right),
 \qquad \alpha=\alpha_{max}\tanh(a),\ a_0=0.
-\]
+$$
 
 This reduces the learned output from 256 values per pixel to roughly 3–4 motion/visibility values. R8 supplies content; Query supplies where that content should move.
 
@@ -295,26 +295,26 @@ This reduces the learned output from 256 values per pixel to roughly 3–4 motio
 
 The order is non-negotiable:
 
-\[
+$$
 Q_t^{base}=D_{OPUS}(F_t^{safe}).
-\]
+$$
 
 Current Query is the attention query; aligned Memory Query controls coordinates; locally sampled historical dense FPN provides key/value:
 
-\[
+$$
 e_{ij}=
 \frac{(W_qQ_{t,i}^{base})^\top(W_kK_{t-1,j})}{\sqrt d}
 -\frac{\|X_{t,i}-\tilde X_{t-1,j}\|^2}{2\sigma^2},
-\]
+$$
 
-\[
+$$
 Q_{t,i}^{out}=Q_{t,i}^{base}
 +W_o\sum_{j\in\mathcal N(i)}
 \operatorname{softmax}_j(e_{ij})W_vV_{t-1,j},
 \qquad W_{o,0}=0.
-\]
+$$
 
-The neighborhood \(\mathcal N(i)\) is small and multi-level. Attention solves correspondence near the current 3D reference point; it must not replay the full historical FPN already consumed by R8.
+The neighborhood $\mathcal N(i)$ is small and multi-level. Attention solves correspondence near the current 3D reference point; it must not replay the full historical FPN already consumed by R8.
 
 固定顺序防止 degraded Query 污染：先得到 safe FPN，再生成 current Query。Current Query 表示当前 Occupancy 需要什么；Memory Query 只决定对齐坐标；历史 Dense FPN 只提供局部真实 K/V。
 
@@ -322,33 +322,33 @@ The neighborhood \(\mathcal N(i)\) is small and multi-level. Attention solves co
 
 Ordinary Feature L1 weights Occupancy-insensitive and Occupancy-sensitive directions equally. A first-order task-aware objective is:
 
-\[
+$$
 \mathcal L_J=
 \left\|J_H(F^{clean})(F^{safe}-F^{clean})\right\|_2^2.
-\]
+$$
 
 The practical approximation is clean-teacher logit distillation:
 
-\[
+$$
 \mathcal L_{KD}=T^2\operatorname{KL}\!\left(
 \operatorname{softmax}(z^{clean}/T)
 \;\|\;
 \operatorname{softmax}(z^{student}/T)
 \right).
-\]
+$$
 
 If Feature-space correction remains misaligned, move the residual to Query or Occupancy-logit space:
 
-\[
+$$
 z^{out}=z^{R8}+\beta\Delta z(Q_t^{out}),\qquad
 \Delta z^{target}=z^{clean}-z^{R8},\qquad \beta_0=0.
-\]
+$$
 
 Decoder Query State distillation must use Query identity or Hungarian matching to avoid supervising mismatched Query order.
 
 ### 7.6 Level-wise optimization and no-regret constraints / 分层优化与 no-regret 约束
 
-Because task/feature gradient ratios range from below \(1\times\) to above \(75\times\), a fixed loss weight cannot balance all levels:
+Because task/feature gradient ratios range from below $1\times$ to above $75\times$, a fixed loss weight cannot balance all levels:
 
 | FPN level | E1 cosine | E1 task/feature norm | E3 cosine | E3 task/feature norm |
 |---:|---:|---:|---:|---:|
@@ -361,21 +361,21 @@ The conflict is amplified by coarse levels 2/3, especially level 3. This explain
 
 冲突主要由 coarse FPN level 2/3 放大，尤其 level 3；因此单一全局 Feature Loss 权重无法同时平衡四个层级。
 
-\[
+$$
 g_{task,l}^{safe}=g_{task,l}-
 \frac{\min(0,g_{task,l}^{\top}g_{feat,l})}
 {\|g_{feat,l}\|^2}g_{feat,l}.
-\]
+$$
 
 A stricter formulation is constrained optimization:
 
-\[
+$$
 \min_\theta \mathcal L_{task}(\theta)
 \quad\text{s.t.}\quad
 \mathcal L_{feat}(F^{safe},F^{clean})
 \le\mathcal L_{feat}(F^{base},F^{clean}),
 \quad \|\Delta\|\le\epsilon.
-\]
+$$
 
 Recommended schedule / 建议训练顺序：
 
