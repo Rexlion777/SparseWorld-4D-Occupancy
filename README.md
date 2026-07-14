@@ -32,7 +32,7 @@ R8 缓存上一个有效时刻的同相机 FPN 特征，仅替换当前失效的
 
 ![R8 BEV repair comparison](assets/r8/r8_bev_repair_comparison.png)
 
-## 正向结果图谱
+## 结果图谱
 
 新增图谱只使用冻结的 SW13A/R8 评测数据，不混入当前尚在验证的 learned repair。它将结果从单一 headline 扩展到 **未来时域、空间区域、动态/小目标、逐样本稳定性、消融与风险约束**；完整画廊含 20 张图和 1,480 条机器可读记录。
 
