@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="430" viewBox="0 0 1200 430" role="img" aria-labelledby="title desc">
+  <title id="title">R8 sensor degradation recovery</title>
+  <desc id="desc">Relative false-negative reductions for four sensor degradation cases.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#071426"/>
+      <stop offset="1" stop-color="#102d46"/>
+    </linearGradient>
+    <linearGradient id="bar" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#15d1c5"/>
+      <stop offset="1" stop-color="#5a8cff"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="430" rx="26" fill="url(#bg)"/>
+  <text x="54" y="62" fill="#ffffff" font-family="Inter,Arial,sans-serif" font-size="30" font-weight="700">R8 CAUSAL FEATURE-MEMORY REPAIR</text>
+  <text x="54" y="94" fill="#a9bfd3" font-family="Inter,Arial,sans-serif" font-size="17">Relative false-negative reduction vs. the frozen degraded SparseWorld baseline</text>
+
+  <g font-family="Inter,Arial,sans-serif" font-size="18" fill="#dce9f5">
+    <text x="54" y="151">Front triplet missing</text>
+    <text x="54" y="216">Single front camera missing</text>
+    <text x="54" y="281">Front triplet · future 4 s</text>
+    <text x="54" y="346">Motion blur</text>
+  </g>
+
+  <g fill="#1b3b55">
+    <rect x="350" y="127" width="700" height="28" rx="14"/>
+    <rect x="350" y="192" width="700" height="28" rx="14"/>
+    <rect x="350" y="257" width="700" height="28" rx="14"/>
+    <rect x="350" y="322" width="700" height="28" rx="14"/>
+  </g>
+  <g fill="url(#bar)">
+    <rect x="350" y="127" width="650" height="28" rx="14"/>
+    <rect x="350" y="192" width="487" height="28" rx="14"/>
+    <rect x="350" y="257" width="294" height="28" rx="14"/>
+    <rect x="350" y="322" width="199" height="28" rx="14"/>
+  </g>
+  <g font-family="Inter,Arial,sans-serif" font-size="24" font-weight="700" fill="#ffffff" text-anchor="end">
+    <text x="1138" y="151">23.2%</text>
+    <text x="1138" y="216">17.4%</text>
+    <text x="1138" y="281">10.5%</text>
+    <text x="1138" y="346">7.1%</text>
+  </g>
+  <text x="54" y="400" fill="#83e0d7" font-family="Inter,Arial,sans-serif" font-size="17" font-weight="600">No future frames · No current-clean oracle · No GT-driven repair · Failed cameras only</text>
+</svg>
